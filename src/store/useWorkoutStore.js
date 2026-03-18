@@ -370,137 +370,121 @@ export const useWorkoutStore = create((set, get) => ({
   syncStatus: 'saved',
 
   syncFromCloud: async ({ setSyncing = true } = {}) => {
-    if (cloudSyncPromise) {
-      return cloudSyncPromise
-    }
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user) {
+        set({ syncStatus: 'offline' })
+        return { ok: false, offline: true }
+      }
 
-    cloudSyncPromise = (async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session?.user) {
-          set({ syncStatus: 'offline' })
-          return { ok: false, offline: true }
+      if (setSyncing) {
+        set({ syncStatus: 'syncing' })
+      }
+
+      const state = get()
+      const activeProgram = state.program
+
+      const [remoteProgress, remoteWorkouts, remoteBodyweight, remoteCustomizations] = await Promise.all([
+        fetchProgressFromSupabase(session.user.id),
+        fetchWorkoutLogsFromSupabase(session.user.id),
+        fetchBodyweightLogsFromSupabase(session.user.id),
+        fetchProgramCustomizationsFromSupabase(session.user.id)
+      ])
+
+      const statePatch = {}
+
+      if (remoteProgress) {
+        const cloudProgress = {
+          currentPhaseId: remoteProgress.current_phase_id,
+          currentWeek: remoteProgress.current_week,
+          currentDayIndex: remoteProgress.current_day_index,
         }
 
-        if (setSyncing) {
-          set({ syncStatus: 'syncing' })
+        if (isValidProgress(activeProgram, cloudProgress)) {
+          storage.saveProgress(cloudProgress)
+          statePatch.currentPhaseId = cloudProgress.currentPhaseId
+          statePatch.currentWeek = cloudProgress.currentWeek
+          statePatch.currentDayIndex = cloudProgress.currentDayIndex
         }
 
-        const state = get()
-        const activeProgram = state.program
+        if (remoteProgress.program_start) {
+          storage.saveProgramStart(remoteProgress.program_start)
+          statePatch.programStart = remoteProgress.program_start
+        }
 
-        const [remoteProgress, remoteWorkouts, remoteBodyweight, remoteCustomizations] = await Promise.all([
-          fetchProgressFromSupabase(session.user.id),
-          fetchWorkoutLogsFromSupabase(session.user.id),
-          fetchBodyweightLogsFromSupabase(session.user.id),
-          fetchProgramCustomizationsFromSupabase(session.user.id)
-        ])
+        if (remoteProgress.weight_unit) {
+          storage.saveWeightUnit(remoteProgress.weight_unit)
+          statePatch.weightUnit = remoteProgress.weight_unit
+        }
 
-        const statePatch = {}
+        if (Number.isFinite(Number(remoteProgress.rest_timer_default))) {
+          const parsedRestTimer = Number(remoteProgress.rest_timer_default)
+          storage.saveRestTimerDefault(parsedRestTimer)
+          statePatch.restTimerDefault = parsedRestTimer
+        }
 
-        if (remoteProgress) {
-          const cloudProgress = {
-            currentPhaseId: remoteProgress.current_phase_id,
-            currentWeek: remoteProgress.current_week,
-            currentDayIndex: remoteProgress.current_day_index,
-          }
-
-          if (isValidProgress(activeProgram, cloudProgress)) {
+        if (Array.isArray(remoteProgress.dismissed_alerts)) {
+          storage.saveDismissedAlerts(remoteProgress.dismissed_alerts)
+          statePatch.dismissedAlerts = remoteProgress.dismissed_alerts
+        }
+      } else if (remoteWorkouts && remoteWorkouts.length > 0) {
+        const lastWorkout = remoteWorkouts[remoteWorkouts.length - 1]
+        if (lastWorkout.phaseId) {
+          const nextDay = getNextDay(activeProgram, lastWorkout.phaseId, lastWorkout.week, lastWorkout.dayIndex)
+          if (nextDay && isValidProgress(activeProgram, { currentPhaseId: nextDay.phaseId, currentWeek: nextDay.week, currentDayIndex: nextDay.dayIndex })) {
+            const cloudProgress = {
+              currentPhaseId: nextDay.phaseId,
+              currentWeek: nextDay.week,
+              currentDayIndex: nextDay.dayIndex
+            }
             storage.saveProgress(cloudProgress)
             statePatch.currentPhaseId = cloudProgress.currentPhaseId
             statePatch.currentWeek = cloudProgress.currentWeek
             statePatch.currentDayIndex = cloudProgress.currentDayIndex
           }
-
-          if (remoteProgress.program_start) {
-            storage.saveProgramStart(remoteProgress.program_start)
-            statePatch.programStart = remoteProgress.program_start
-          }
-
-          if (remoteProgress.weight_unit) {
-            storage.saveWeightUnit(remoteProgress.weight_unit)
-            statePatch.weightUnit = remoteProgress.weight_unit
-          }
-
-          if (Number.isFinite(Number(remoteProgress.rest_timer_default))) {
-            const parsedRestTimer = Number(remoteProgress.rest_timer_default)
-            storage.saveRestTimerDefault(parsedRestTimer)
-            statePatch.restTimerDefault = parsedRestTimer
-          }
-
-          if (Array.isArray(remoteProgress.dismissed_alerts)) {
-            storage.saveDismissedAlerts(remoteProgress.dismissed_alerts)
-            statePatch.dismissedAlerts = remoteProgress.dismissed_alerts
-          }
-        } else if (remoteWorkouts && remoteWorkouts.length > 0) {
-          const lastWorkout = remoteWorkouts[remoteWorkouts.length - 1]
-          if (lastWorkout.phaseId) {
-            const nextDay = getNextDay(activeProgram, lastWorkout.phaseId, lastWorkout.week, lastWorkout.dayIndex)
-            if (nextDay && isValidProgress(activeProgram, { currentPhaseId: nextDay.phaseId, currentWeek: nextDay.week, currentDayIndex: nextDay.dayIndex })) {
-              const cloudProgress = {
-                currentPhaseId: nextDay.phaseId,
-                currentWeek: nextDay.week,
-                currentDayIndex: nextDay.dayIndex
-              }
-              storage.saveProgress(cloudProgress)
-              statePatch.currentPhaseId = cloudProgress.currentPhaseId
-              statePatch.currentWeek = cloudProgress.currentWeek
-              statePatch.currentDayIndex = cloudProgress.currentDayIndex
-            }
-          }
         }
-
-        let hasRemoteError = false
-
-        if (remoteWorkouts === null) {
-          hasRemoteError = true
-        } else {
-          const merged = mergeCompletedDays(get().completedDays, remoteWorkouts)
-          if (merged.changed) {
-            storage.saveCompletedDays(merged.items)
-            statePatch.completedDays = merged.items
-          }
-        }
-        
-        if (remoteBodyweight !== null) {
-          // simple replacement strategy for bodyweight (Supabase is source of truth for history)
-          // If local has logs not in remote, we might lose them without a merge. 
-          // For simplicity, we just take remote if it exists.
-          if (remoteBodyweight.length > 0) {
-            storage.saveBodyweightLogs(remoteBodyweight)
-            statePatch.bodyweightLogs = remoteBodyweight
-          }
-        }
-
-        if (remoteCustomizations !== null) {
-          // Merge remote over local
-          const localC = get().programCustomizations
-          const mergedC = { ...localC, ...remoteCustomizations }
-          storage.saveProgramCustomizations(mergedC)
-          statePatch.programCustomizations = mergedC
-        }
-
-        if (Object.keys(statePatch).length > 0) {
-          set(statePatch)
-        }
-
-        set({ syncStatus: hasRemoteError ? 'error' : 'saved' })
-        return {
-          ok: !hasRemoteError,
-          offline: false,
-          pulledWorkouts: Array.isArray(remoteWorkouts) ? remoteWorkouts.length : 0,
-        }
-      } catch (err) {
-        console.error('Failed to sync from Supabase:', err)
-        set({ syncStatus: navigator.onLine ? 'error' : 'offline' })
-        return { ok: false, offline: !navigator.onLine, error: err }
       }
-    })()
 
-    try {
-      return await cloudSyncPromise
-    } finally {
-      cloudSyncPromise = null
+      let hasRemoteError = false
+
+      if (remoteWorkouts === null) {
+        hasRemoteError = true
+      } else {
+        const merged = mergeCompletedDays(get().completedDays, remoteWorkouts)
+        if (merged.changed) {
+          storage.saveCompletedDays(merged.items)
+          statePatch.completedDays = merged.items
+        }
+      }
+      
+      if (remoteBodyweight !== null) {
+        if (remoteBodyweight.length > 0) {
+          storage.saveBodyweightLogs(remoteBodyweight)
+          statePatch.bodyweightLogs = remoteBodyweight
+        }
+      }
+
+      if (remoteCustomizations !== null) {
+        const localC = get().programCustomizations
+        const mergedC = { ...localC, ...remoteCustomizations }
+        storage.saveProgramCustomizations(mergedC)
+        statePatch.programCustomizations = mergedC
+      }
+
+      if (Object.keys(statePatch).length > 0) {
+        set(statePatch)
+      }
+
+      set({ syncStatus: hasRemoteError ? 'error' : 'saved' })
+      return {
+        ok: !hasRemoteError,
+        offline: false,
+        pulledWorkouts: Array.isArray(remoteWorkouts) ? remoteWorkouts.length : 0,
+      }
+    } catch (err) {
+      console.error('Failed to sync from Supabase:', err)
+      set({ syncStatus: navigator.onLine ? 'error' : 'offline' })
+      return { ok: false, offline: !navigator.onLine, error: err }
     }
   },
 
@@ -574,6 +558,22 @@ export const useWorkoutStore = create((set, get) => ({
 
     // Then fetch latest cloud changes so other-device updates appear locally.
     await get().syncFromCloud({ setSyncing: true })
+
+    // Auto-sync when user returns to the tab/app (mobile browser background resume)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        get().syncFromCloud({ setSyncing: false })
+      }
+    }
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    // Auto-sync when device comes back online
+    const onOnline = () => {
+      get().syncFromCloud({ setSyncing: true })
+    }
+    window.removeEventListener('online', onOnline)
+    window.addEventListener('online', onOnline)
   },
 
   // Set program start date (first launch)

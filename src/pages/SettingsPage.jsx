@@ -615,7 +615,7 @@ function SettingsPage() {
             Jump to a specific phase, week, and day in your {planDisplayName}.
           </p>
 
-          <div className="mt-3 grid gap-3 md:grid-cols-[1fr_9rem_11rem_auto]">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
             <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
               Phase
               <select
