@@ -206,43 +206,47 @@ export function ExerciseCard({
             </div>
           )}
 
-          <div className="mb-2 grid grid-cols-[2rem_1fr_1fr_1fr_1.5rem] gap-2 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-            <span>Set</span><span>Weight</span><span>Reps</span><span>RPE</span><span></span>
+          <div className="mb-2 flex gap-2 text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+            <span className="w-8 shrink-0 text-center">Set</span>
+            <span className="flex-1 min-w-0">Weight</span>
+            <span className="flex-1 min-w-0">Reps</span>
+            <span className="flex-1 min-w-0">RPE</span>
+            <span className="w-6 shrink-0"></span>
           </div>
 
         {(exerciseLog[exercise.id]?.sets || []).map((set, setIdx) => (
           <div key={setIdx} className="mb-1.5">
-            <div className="grid grid-cols-[2rem_1fr_1fr_1fr_1.5rem] gap-2 items-center">
-              <span className="text-xs font-medium text-zinc-400 text-center">{set.setNumber}</span>
-              <div>
+            <div className="flex flex-row gap-2 items-start">
+              <span className="w-8 shrink-0 text-xs font-medium text-zinc-400 text-center pt-2">{set.setNumber}</span>
+              <div className="flex-1 min-w-0">
                 <input
                   type="text" inputMode="decimal"
                   value={set.weight}
                   onChange={(e) => handleSetFieldChange(setIdx, 'weight', e.target.value)}
-                  className="w-full rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-400"
+                  className="w-full min-w-0 rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-400"
                   placeholder={previous?.weight || weightUnit}
                 />
                 {setIdx === 0 && previous && (
-                  <p className="pt-1 text-[10px] text-zinc-400">Last time: {previous.weight}{weightUnit} × {previous.reps || '?'}</p>
+                  <p className="pt-1 text-[10px] text-zinc-400 truncate w-full">Last time: {previous.weight}{weightUnit} × {previous.reps || '?'}</p>
                 )}
               </div>
               <input
                 type="text" inputMode="numeric"
                 value={set.reps}
                 onChange={(e) => handleSetFieldChange(setIdx, 'reps', e.target.value)}
-                className="rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-400"
+                className="flex-1 w-full min-w-0 rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-400"
                 placeholder="reps"
               />
               <input
                 type="text" inputMode="decimal"
                 value={set.rpe}
                 onChange={(e) => updateSet(exercise.id, setIdx, 'rpe', e.target.value)}
-                className="rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-400"
+                className="flex-1 w-full min-w-0 rounded border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-400"
                 placeholder="RPE"
               />
               <button
                 onClick={() => removeSet(exercise.id, setIdx)}
-                className="text-zinc-300 hover:text-red-500 text-center"
+                className="w-6 shrink-0 pt-2 text-zinc-300 hover:text-red-500 flex justify-center"
                 title="Remove set"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14"/></svg>
@@ -296,15 +300,18 @@ export function ExerciseCard({
             exerciseHistory.slice().reverse().map((session, i) => (
               <div key={i} className="mb-3 border-b border-zinc-100 pb-3 last:border-0 last:pb-0">
                 <p className="text-xs font-semibold text-zinc-900 mb-1">{session.dateStr}</p>
-                <div className="grid grid-cols-[2rem_1fr_1fr_1fr] gap-2 text-[10px] font-medium text-zinc-500 mb-1">
-                  <span>Set</span><span>Weight</span><span>Reps</span><span>RPE</span>
+                <div className="flex gap-2 text-[10px] font-medium text-zinc-500 mb-1">
+                  <span className="w-8 shrink-0 text-center">Set</span>
+                  <span className="flex-1 min-w-0">Weight</span>
+                  <span className="flex-1 min-w-0">Reps</span>
+                  <span className="flex-1 min-w-0">RPE</span>
                 </div>
                 {(session.sets || []).map((s, idx) => (
-                  <div key={idx} className="grid grid-cols-[2rem_1fr_1fr_1fr] gap-2 text-xs text-zinc-800 mb-0.5">
-                    <span className="text-zinc-400">{s.setNumber || idx + 1}</span>
-                    <span className="font-medium text-zinc-700">{s.weight ? `${s.weight}kg` : '-'}</span>
-                    <span>{s.reps || '-'}</span>
-                    <span>{s.rpe || '-'}</span>
+                  <div key={idx} className="flex gap-2 text-xs text-zinc-800 mb-0.5">
+                    <span className="w-8 shrink-0 text-center text-zinc-400">{s.setNumber || idx + 1}</span>
+                    <span className="flex-1 min-w-0 font-medium text-zinc-700 truncate">{s.weight ? `${s.weight}kg` : '-'}</span>
+                    <span className="flex-1 min-w-0 truncate">{s.reps || '-'}</span>
+                    <span className="flex-1 min-w-0 truncate">{s.rpe || '-'}</span>
                   </div>
                 ))}
                 <div className="mt-1.5 flex items-center justify-between text-[10px] text-zinc-500">

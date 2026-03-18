@@ -432,6 +432,22 @@ export const useWorkoutStore = create((set, get) => ({
             storage.saveDismissedAlerts(remoteProgress.dismissed_alerts)
             statePatch.dismissedAlerts = remoteProgress.dismissed_alerts
           }
+        } else if (remoteWorkouts && remoteWorkouts.length > 0) {
+          const lastWorkout = remoteWorkouts[remoteWorkouts.length - 1]
+          if (lastWorkout.phaseId) {
+            const nextDay = getNextDay(activeProgram, lastWorkout.phaseId, lastWorkout.week, lastWorkout.dayIndex)
+            if (nextDay && isValidProgress(activeProgram, { currentPhaseId: nextDay.phaseId, currentWeek: nextDay.week, currentDayIndex: nextDay.dayIndex })) {
+              const cloudProgress = {
+                currentPhaseId: nextDay.phaseId,
+                currentWeek: nextDay.week,
+                currentDayIndex: nextDay.dayIndex
+              }
+              storage.saveProgress(cloudProgress)
+              statePatch.currentPhaseId = cloudProgress.currentPhaseId
+              statePatch.currentWeek = cloudProgress.currentWeek
+              statePatch.currentDayIndex = cloudProgress.currentDayIndex
+            }
+          }
         }
 
         let hasRemoteError = false

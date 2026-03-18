@@ -718,12 +718,12 @@ function SettingsPage() {
             Download structured CSVs and a polished monthly training report.
           </p>
 
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-row lg:flex-wrap items-center gap-2">
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-row lg:flex-wrap items-stretch lg:items-center gap-2">
             <button
               type="button"
               onClick={onExportAllWorkoutsCsv}
               disabled={isExportingAllCsv}
-              className="w-full text-center rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="w-full text-center flex-1 rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               {isExportingAllCsv ? 'Preparing CSV...' : 'Export Workouts (CSV)'}
             </button>
@@ -732,24 +732,24 @@ function SettingsPage() {
               type="button"
               onClick={onExportCsvZip}
               disabled={isExportingCsv}
-              className="w-full text-center rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="w-full text-center flex-1 rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               {isExportingCsv ? 'Preparing Zip...' : 'Export CSV Archive'}
             </button>
 
-            <div className="flex w-full gap-2 lg:w-auto">
+            <div className="flex flex-col w-full gap-2 sm:flex-row sm:col-span-2 lg:w-auto">
               <input
                 type="month"
                 value={reportMonth}
                 onChange={(event) => setReportMonth(event.target.value)}
-                className="flex-1 lg:w-32 rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+                className="w-full sm:flex-1 lg:w-32 rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
               />
 
               <button
                 type="button"
                 onClick={onExportMonthlyPdf}
                 disabled={isExportingMonthlyPdf}
-                className="flex-1 text-center rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                className="w-full sm:flex-1 text-center rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
                 {isExportingMonthlyPdf ? 'Generating...' : 'Export PDF'}
               </button>

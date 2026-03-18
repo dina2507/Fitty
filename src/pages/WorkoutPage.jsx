@@ -931,7 +931,7 @@ function WorkoutPage() {
     <div className={`mx-auto grid max-w-4xl gap-4 px-4 py-6 ${isKeyboardInputFocused ? 'pb-[62vh]' : 'pb-[50vh]'}`}>
       
       {activeCustomTemplate ? (
-        <section className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm flex items-center justify-between">
+        <section className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600 mb-1">
               {activeCustomTemplate?.templateSource === 'program' ? 'Program Day Override Active' : 'Custom Workout Active'}
@@ -941,7 +941,7 @@ function WorkoutPage() {
               <p className="mt-1 text-xs text-zinc-600">Week {activeCustomTemplate.templateWeek}</p>
             )}
           </div>
-          <button onClick={onCancelCustom} className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition shadow-sm">
+          <button onClick={onCancelCustom} className="w-full sm:w-auto rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition shadow-sm">
             {activeCustomTemplate?.templateSource === 'program' ? 'Use Default Day' : 'Discard'}
           </button>
         </section>
@@ -980,17 +980,17 @@ function WorkoutPage() {
         <>
           {/* Day Header with Progress */}
           <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
               <div>
-                <h2 className="text-lg font-semibold text-zinc-900 flex items-center gap-2">
+                <h2 className="text-lg font-semibold text-zinc-900 flex flex-wrap items-center gap-2">
                   {activeCustomTemplate ? 'Workout Session' : programDay.label}
                   {todaysWorkout && !activeCustomTemplate && <span className="text-[10px] font-bold uppercase tracking-wider bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded">Editing Today</span>}
                 </h2>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-zinc-500 mt-0.5">
                   {progress.done}/{progress.total} exercises logged
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setShowPlateCalculator(true)}
@@ -1029,7 +1029,7 @@ function WorkoutPage() {
 
           {hasRecommendedSection && (
             <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 shadow-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Recommended</p>
                   <p className="text-xs text-amber-800">Moved exercises queued for this day.</p>
@@ -1037,7 +1037,7 @@ function WorkoutPage() {
                 <button
                   type="button"
                   onClick={addAllRecommendedExercises}
-                  className="rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
+                  className="w-full sm:w-auto rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
                 >
                   Add All ({recommendedExercises.length})
                 </button>
@@ -1045,9 +1045,9 @@ function WorkoutPage() {
 
               <div className="mt-3 grid gap-2">
                 {recommendedExercises.map((exercise) => (
-                  <div key={exercise.scheduledTransferId || exercise.id} className="flex items-center justify-between rounded-lg border border-amber-200 bg-white px-3 py-2">
-                    <div>
-                      <p className="text-sm font-medium text-zinc-900">{exercise.name}</p>
+                  <div key={exercise.scheduledTransferId || exercise.id} className="flex items-center justify-between rounded-lg border border-amber-200 bg-white px-3 py-2 max-w-full">
+                    <div className="min-w-0 flex-1 pr-2">
+                      <p className="text-sm font-medium text-zinc-900 truncate">{exercise.name}</p>
                       <p className="text-[11px] text-zinc-500">{exercise.workingSets || '?'} sets × {exercise.reps || '?'}</p>
                     </div>
                     <button
