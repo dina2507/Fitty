@@ -48,8 +48,34 @@ function WorkoutPage() {
 
   const todaysWorkout = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0]
-    return completedDays.find((d) => d.date.startsWith(todayStr))
-  }, [completedDays])
+    const todaysLogs = (completedDays || []).filter((day) => {
+      return String(day?.date || '').startsWith(todayStr)
+        && !day?.deletedAt
+        && !day?.deleted_at
+    })
+
+    if (!todaysLogs.length || !baseProgramDay) {
+      return null
+    }
+
+    const slotMatches = todaysLogs.filter((day) => {
+      return day.phaseId === currentPhaseId
+        && Number(day.week) === Number(currentWeek)
+        && Number(day.dayIndex) === Number(baseProgramDay.dayIndex)
+    })
+
+    if (!slotMatches.length) {
+      return null
+    }
+
+    const sortedByUpdate = [...slotMatches].sort((a, b) => {
+      const aTs = new Date(a.updatedAt || a.updated_at || a.date).getTime()
+      const bTs = new Date(b.updatedAt || b.updated_at || b.date).getTime()
+      return bTs - aTs
+    })
+
+    return sortedByUpdate[0]
+  }, [baseProgramDay, completedDays, currentPhaseId, currentWeek])
 
   // Only treat today's completed workout as the active program day
   // if it matches the current program position. This prevents Program
@@ -711,12 +737,15 @@ function WorkoutPage() {
     const workoutLabelOverride = activeCustomTemplate?.name || undefined
 
     try {
-      if (!activeCustomTemplate && todaysWorkout) {
+      if (!activeCustomTemplate && todaysWorkout && isSameProgramSlotAsToday) {
         await updateTodayWorkout(payload, {
           sessionNotes,
           durationMinutes,
           prExercises,
           workoutLabel: workoutLabelOverride,
+          phaseId: currentPhaseId,
+          week: currentWeek,
+          dayIndex: programDay?.dayIndex,
         })
       } else {
         await completeWorkout(payload, {
@@ -728,7 +757,7 @@ function WorkoutPage() {
         })
       }
 
-      if (!activeCustomTemplate && todaysWorkout && programDay) {
+      if (!activeCustomTemplate && todaysWorkout && isSameProgramSlotAsToday && programDay) {
         clearScheduledExercisesForDay(currentPhaseId, currentWeek, programDay.dayIndex)
       }
 
@@ -756,6 +785,7 @@ function WorkoutPage() {
     currentWeek,
     elapsedSeconds,
     exerciseLog,
+    isSameProgramSlotAsToday,
     isSavingWorkout,
     navigate,
     programDay,
@@ -796,7 +826,7 @@ function WorkoutPage() {
       return
     }
 
-    if (todaysWorkout) {
+    if (todaysWorkout && isSameProgramSlotAsToday) {
       const fullExercises = (todaysWorkout.exercises || []).map((loggedExercise) => {
         const original = fallbackProgramDay.exercises?.find(
           (candidate) => candidate.id === loggedExercise.exerciseId,
@@ -838,7 +868,7 @@ function WorkoutPage() {
     setSessionNotes('')
     setStartTime(Date.now())
     setSessionNotice('Back to your default day workout.')
-  }, [baseProgramDay, clearCustomWorkoutTemplate, programDay, todaysWorkout])
+  }, [baseProgramDay, clearCustomWorkoutTemplate, isSameProgramSlotAsToday, programDay, todaysWorkout])
 
   // ── Cancel/Discard Workout ──
   const onCancelCustom = () => {
@@ -997,7 +1027,7 @@ function WorkoutPage() {
               <div>
                 <h2 className="text-lg font-semibold text-zinc-900 flex flex-wrap items-center gap-2">
                   {activeCustomTemplate ? 'Workout Session' : programDay.label}
-                  {todaysWorkout && !activeCustomTemplate && <span className="text-[10px] font-bold uppercase tracking-wider bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded">Editing Today</span>}
+                  {todaysWorkout && isSameProgramSlotAsToday && !activeCustomTemplate && <span className="text-[10px] font-bold uppercase tracking-wider bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded">Editing Today</span>}
                 </h2>
                 <p className="text-xs text-zinc-500 mt-0.5">
                   {progress.done}/{progress.total} exercises logged

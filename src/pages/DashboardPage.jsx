@@ -444,6 +444,15 @@ function DashboardPage() {
             />
           ))}
         </div>
+
+        <div className="mt-3 flex justify-end">
+          <Link
+            to="/workout"
+            className="w-full sm:w-auto rounded-full bg-zinc-900 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-zinc-700"
+          >
+            Start Selected Day Workout
+          </Link>
+        </div>
       </section>
 
       {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} />}

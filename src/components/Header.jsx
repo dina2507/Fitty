@@ -47,9 +47,6 @@ function Header() {
             <NavLink to="/" className={navClass} end>
               Dashboard
             </NavLink>
-            <NavLink to="/workout" className={navClass}>
-              Workout
-            </NavLink>
             <NavLink to="/history" className={navClass}>
               History
             </NavLink>

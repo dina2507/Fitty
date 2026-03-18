@@ -40,7 +40,10 @@ self.addEventListener('fetch', (event) => {
       return fetch(event.request)
         .then((response) => {
           const clone = response.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
+          // Only cache http/https requests, skip chrome-extension and other schemes
+          if (event.request.url.startsWith('http')) {
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
+          }
           return response
         })
         .catch(() => cached)

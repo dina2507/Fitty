@@ -13,21 +13,34 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoading(false)
-    })
+    // Get initial session with timeout to avoid hanging when offline
+    const initAuthWithTimeout = async () => {
+      try {
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Auth init timeout')), 5000),
+        )
+        const sessionPromise = supabase.auth.getSession().then(({ data: { session } }) => session)
+        const session = await Promise.race([sessionPromise, timeoutPromise])
+        setSession(session)
+      } catch (err) {
+        // Offline or timeout — allow local-only mode
+        console.warn('Auth init failed (offline?), continuing with local mode:', err?.message)
+        setSession(null)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    initAuthWithTimeout()
 
     // Listen for auth state changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
-      setLoading(false)
     })
 
-    return () => subscription.unsubscribe()
+    return () => subscription?.unsubscribe()
   }, [])
 
   const signOut = async () => {

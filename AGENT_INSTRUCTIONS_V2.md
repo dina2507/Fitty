@@ -1,708 +1,414 @@
-# PPL Tracker — Agent Instructions V2
+# Fitty — Agent Task Brief
+
+_Last updated: March 2026_
 
 ---
 
-## WHAT IS ALREADY BUILT — DO NOT REBUILD ANY OF THIS
+## CONTEXT — READ THIS FIRST
 
-The following is fully complete and working. Build on top of it. Never overwrite or recreate it.
+This is a personal PPL workout tracker used by the owner and a small group of friends/family.
+Each person has their own Supabase account. The app is built with React + Vite + Tailwind + Zustand + Supabase.
 
-### Project Setup
-- React + Vite + Tailwind + PostCSS configured
-- `package.json`, `vite.config.js`, `tailwind.config.js`, `postcss.config.js`
-- `.gitignore`, `index.html`, `public/index.html`
-- `src/main.jsx`, `src/App.jsx`, `src/index.css`
+**The owner's core usage pattern:**
 
-### Data
-- `src/data/program.json` — full Jeff Nippard PPL program data (all 3 phases)
+- Logs workouts daily on their phone
+- Occasionally reviews history on a laptop or a different phone
+- Needs all data to be there when they switch devices
 
-### Utilities
-- `src/utils/storage.js` — localStorage helpers
-- `src/utils/progressTracker.js` — next-day traversal, rest-day skipping, phase advancement
-- `src/utils/dayTheme.js` — day-type theming
+**Two problems to solve:**
 
-### Store
-- `src/store/useWorkoutStore.js` — Zustand store with:
-  - localStorage persistence
-  - workout completion + auto-advance
-  - skip-day flow
-  - manual day jump
-  - export / import / reset actions
-  - saved-progress validation guards
-
-### Components
-- `src/components/Header.jsx`
-- `src/components/PhaseIndicator.jsx`
-- `src/components/DayCard.jsx`
-- `src/components/ExerciseCard.jsx` — with Track, History, Graph tabs + estimated 1RM chart (Recharts)
-- `src/components/ProgressBar.jsx`
-
-### Pages and Routes
-- `src/pages/DashboardPage.jsx` — phase/week/day display, weekly plan cards, progress bar, calendar modal
-- `src/pages/WorkoutPage.jsx` — exercise rendering, weight/reps/effort/notes inputs, complete + skip actions, rest-day UI
-- `src/pages/HistoryPage.jsx` — completed workout list, delete entries
-- `src/pages/SettingsPage.jsx` — start date, export/import/reset
-- Routes: `/`, `/workout`, `/history`, `/settings`, fallback → `/`
-
-### Other
-- `CalendarModal` — shows scheduled/completed days from Dashboard
-- Global `ErrorBoundary` in `main.jsx`
-- Duplicate workout log prevention (safe load + update for same day)
-- Production build verified (`npm run build`)
-- Dev server verified (`npm run dev`)
+1. Sync is broken — data duplicates or disappears, it behaves unpredictably
+2. No reliable backup — there is no safety net if something goes wrong
 
 ---
 
-## TECH STACK
+## RULE 0 — DO NOT BREAK WHAT WORKS
 
-- React + Vite (done)
-- Tailwind CSS (done)
-- Zustand (done)
-- React Router v6 (done)
-- Supabase — Auth + PostgreSQL (NEW — add now)
-- Recharts — already used for 1RM graph
-- Vercel — hosting
+Before touching any file, read the existing implementation fully.
+Do not remove working features. Do not rebuild what already exists.
+The program.json, all utility files, all hooks, and the Zustand store structure must stay intact.
+Only modify what this task explicitly asks you to change.
 
 ---
 
-## SUPABASE CREDENTIALS
+## TASK 2 — GOOGLE DRIVE BACKUP (one-tap, like FitNotes)
+
+### What to build
+
+A reliable safety net: one button exports all user data to Google Drive.
+One button restores from the most recent backup file in Google Drive.
+This is in addition to Supabase — it is a backup, not a replacement.
+
+The owner specifically said they love Google Drive and want one-tap backup.
+
+### Technical approach
+
+Use the **Google Drive REST API v3** with **Google Identity Services** (OAuth 2.0 popup).
+No server needed — this is a pure browser-side OAuth flow using the `gapi` client library.
+
+**Files to create:**
+
+- `src/lib/googleDrive.js` — all Google Drive API logic
+- `src/components/DriveBackup.jsx` — the UI component
+- Update `src/pages/SettingsPage.jsx` — add a "Google Drive Backup" section
+
+**Environment variables to add to `.env` and Vercel:**
 
 ```
-VITE_SUPABASE_URL=https://hearehilalxcwjxjbtzh.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhlYXJlaGlsYWx4Y3dqeGpidHpoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NjQzODMsImV4cCI6MjA4OTM0MDM4M30.hGvJs8wv7sogS7cUbAw8C2KH5v8rrIrblNaXvssiPJg
+VITE_GOOGLE_CLIENT_ID=your_google_oauth_client_id
 ```
 
-- Store in `.env` at project root
-- Add `.env` to `.gitignore`
-- Create `src/lib/supabaseClient.js` to initialize the Supabase client
+The agent must tell the user exactly how to get this value (see instructions below).
 
----
+### How to get the Google OAuth Client ID (instruct the user to do this)
 
-## SUPABASE DATABASE SCHEMA
-
-Enable Row Level Security (RLS) on ALL tables.
-RLS policy on every table: `user_id = auth.uid()` for SELECT, INSERT, UPDATE, DELETE.
-
----
-
-### Table: user_progress
-```sql
-create table user_progress (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users unique not null,
-  current_phase_id text,
-  current_week int,
-  current_day_index int,
-  program_start date,
-  weight_unit text default 'kg',
-  rest_timer_default int default 120,
-  updated_at timestamp default now()
-);
-```
-
----
-
-### Table: workout_logs
-```sql
-create table workout_logs (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users not null,
-  date date not null,
-  phase_id text,
-  week_number int,
-  day_index int,
-  day_label text,
-  workout_type text,
-  exercises jsonb,
-  duration_minutes int,
-  notes text,
-  pr_exercises text[],
-  created_at timestamp default now()
-);
-```
-
-exercises jsonb structure:
-```json
-[
-  {
-    "exerciseId": "string",
-    "name": "string",
-    "muscleGroup": "string",
-    "sets": [
-      { "setNumber": 1, "weight": 80, "reps": 5, "rpe": 8, "notes": "" }
-    ]
-  }
-]
-```
-
----
-
-### Table: custom_exercises
-```sql
-create table custom_exercises (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users not null,
-  name text not null,
-  muscle_group text not null,
-  secondary_muscles text[],
-  equipment text,
-  default_sets int,
-  default_reps text,
-  default_rpe text,
-  default_rest text,
-  notes text,
-  created_at timestamp default now()
-);
-```
-
----
-
-### Table: custom_workouts
-```sql
-create table custom_workouts (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users not null,
-  name text not null,
-  workout_type text,
-  exercises jsonb,
-  is_template boolean default false,
-  created_at timestamp default now(),
-  updated_at timestamp default now()
-);
-```
-
-exercises jsonb structure inside custom_workouts:
-```json
-[
-  {
-    "exerciseId": "string",
-    "name": "string",
-    "muscleGroup": "string",
-    "warmupSets": "string",
-    "workingSets": 2,
-    "reps": "8-10",
-    "rpe": "8-9",
-    "rest": "~2-3 min",
-    "sub1": "string",
-    "sub2": "string",
-    "notes": "string",
-    "isSuperset": false,
-    "supersetGroup": null
-  }
-]
-```
-
----
-
-## MUSCLE GROUP CATEGORIES
-
-Use these exact values everywhere (badges, filters, DB, JSON):
+Add this to the top of the TASK output or as a comment block in `googleDrive.js`:
 
 ```
-Chest | Back | Shoulders | Biceps | Triceps |
-Quads | Hamstrings | Glutes | Calves | Core | Full Body
+SETUP REQUIRED (one-time, done by the developer):
+1. Go to https://console.cloud.google.com
+2. Create a new project called "Fitty"
+3. Go to APIs & Services → Enable APIs → enable "Google Drive API"
+4. Go to APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID
+5. Application type: Web application
+6. Authorised JavaScript origins: add https://your-vercel-domain.vercel.app AND http://localhost:5173
+7. Copy the Client ID and add it to .env as VITE_GOOGLE_CLIENT_ID
+8. Go to APIs & Services → OAuth consent screen → add your email as a test user
 ```
 
-Add `muscleGroup` field to every exercise in `src/data/program.json` using this map:
-- Bench Press, Larsen Press, Press-Around, Pec Flye, Push Up variations → `Chest`
-- Arnold Press, Lateral Raise, Front Raise, Face Pull, Y-Raise → `Shoulders`
-- Lat Pulldown, Pull-Up, Row variations, Pullover → `Back`
-- Shrug → `Back`
-- Curl variations, Preacher Curl → `Biceps`
-- Tricep Pressdown, Skull Crusher, Tricep Extension, Diamond Push Up → `Triceps`
-- Squat, Leg Press, Lunge, Step-Up → `Quads`
-- RDL, Deadlift, Leg Curl, Glute Ham Raise, Hip Thrust → `Hamstrings`
-- Calf Raise → `Calves`
-- Crunch, Leg Raise → `Core`
+### `src/lib/googleDrive.js` — implement these functions
 
----
-
-## AUTH
-
-- Email + password via Supabase Auth
-- `src/pages/AuthPage.jsx` — Login / Sign Up toggle, inline error messages
-- Protect ALL routes — redirect to `/auth` if no active session
-- After login → redirect to `/`
-- On very first login (no `user_progress` row exists) → prompt user to set program start date
-- Logout button in Settings page
-
----
-
-## COMPLETE PAGE SPECIFICATIONS
-
----
-
-### Auth Page `/auth` — NEW
-
-- Toggle between Login and Sign Up
-- Email + password fields
-- Show Supabase error messages inline (e.g. "Invalid credentials")
-- On success → redirect to `/`
-- Show loading state on submit button
-
----
-
-### Dashboard `/` — UPDATE EXISTING
-
-Keep everything already built. Add:
-
-- Today's muscle groups being trained (e.g. `Chest · Shoulders · Triceps`)
-- Weekly volume summary — total sets per muscle group this week (compact badge row)
-- Sync status indicator in header: `☁️ Saved` / `🔄 Syncing` / `📴 Offline`
-- If first-ever login and no program started → show two options:
-  - "Follow Jeff Nippard PPL Program"
-  - "Start a Custom Workout"
-
----
-
-### Workout Page `/workout` — UPDATE EXISTING
-
-Keep everything already built. Add:
-
-**Per exercise card:**
-- Muscle group badge (colored by muscle group)
-- Superset grouping — A1/A2 exercises visually connected with a bracket line
-- "Swap Exercise" button:
-  - Opens modal with 3 tabs: Jeff Nippard Subs | Same Muscle Group | Search All
-  - Selecting a swap replaces only for this session (does not modify template)
-- "Last time: 80kg × 5" shown as placeholder text under weight input
-  - Pull from most recent `workout_logs` entry for same exercise ID
-- Set each row: weight input + reps input + RPE (optional) + delete button
-- After logging any set → auto-start rest timer based on exercise rest field
-
-**Rest timer (floating bottom bar):**
-- Shows countdown when active
-- Vibrates on completion (`navigator.vibrate([200, 100, 200])`)
-- User can dismiss or add 30s
-- Default duration from user's settings if exercise has no rest field
-
-**Session level:**
-- Duration timer in header — elapsed time since workout started (MM:SS)
-- Session notes text area at bottom of page
-- PR badge 🏆 on exercise card if current set exceeds all-time max for that exercise
-
-**On "Complete Workout":**
-- Run PR detection (compare all sets against `workout_logs` history)
-- Save full log to Supabase `workout_logs`
-- Advance to next day
-- Show completion modal with summary: exercises done, total volume, any PRs hit
-
----
-
-### History Page `/history` — UPDATE EXISTING
-
-Keep everything already built. Add:
-
-- Filter bar: `All` / `Push` / `Pull` / `Legs` / muscle group pills
-- Each workout card shows:
-  - Date, workout label, muscle groups trained (badges)
-  - Total sets count, total volume (kg × reps summed)
-- Expand card → full exercise/set/rep breakdown
-- Edit button → opens edit modal (update `workout_logs` in Supabase)
-- Delete button → confirm dialog → delete from Supabase
-- PR section at top of page:
-  - Shows current all-time max weight per exercise (highest ever logged)
-  - Highlight with 🏆 badge
-
----
-
-### Exercises Page `/exercises` — NEW
-
-Searchable exercise library.
-
-**Two tabs:**
-
-Tab 1: Jeff Nippard Program (read-only)
-- All exercises from `program.json`
-- Search by name
-- Filter by muscle group
-- Filter by equipment
-- Each card: name, muscle group badge, default sets/reps/RPE
-
-Tab 2: My Exercises (full CRUD via `custom_exercises` table)
-- Same search and filter
-- "Add Exercise" button → form modal:
-  - Name (required)
-  - Muscle group (required, dropdown)
-  - Secondary muscles (multi-select)
-  - Equipment (text)
-  - Default sets, reps, RPE, rest
-  - Notes
-- Edit and delete on each custom exercise
-- Save to Supabase immediately
-
-**Tap any exercise → Exercise Detail view:**
-- Full exercise info
-- All past logged sets pulled from `workout_logs` (filter by exercise name)
-- Mini line chart: weight over time (reuse Recharts already installed)
-- PR badge showing all-time max
-
----
-
-### Program Page `/program` — UPDATE EXISTING
-
-Keep Jeff Nippard read-only browser. Add:
-
-**New "My Workouts" tab:**
-- List of saved `custom_workouts` templates
-- "Create Workout" button → opens Workout Builder:
-  - Name the workout (text input)
-  - Select workout type (push / pull / legs / upper / lower / full body / custom)
-  - Add exercises from library (search + filter by muscle group)
-  - Set warmup sets, working sets, reps, RPE, rest per exercise
-  - Drag to reorder exercises
-  - Mark two exercises as a superset pair (checkbox)
-  - Save → writes to `custom_workouts` in Supabase
-- Edit and delete custom workout templates
-- "Use This Workout Today" button:
-  - Loads template exercises into active workout session
-  - Navigates to `/workout`
-
----
-
-### Stats Page `/stats` — NEW
-
-All data pulled from `workout_logs` in Supabase.
-
-**Charts using Recharts:**
-
-1. Weekly Volume by Muscle Group (stacked bar chart, last 8 weeks)
-   - X axis: week labels
-   - Y axis: total sets
-   - Each bar segment = one muscle group (use muscle group colors)
-
-2. Total Sets per Week (line chart, last 12 weeks)
-
-3. PR Progress per Exercise (line chart)
-   - Dropdown to select exercise
-   - X axis: date
-   - Y axis: max weight logged that session
-
-4. Workout Frequency Heatmap (GitHub-style calendar grid)
-   - Last 12 weeks shown
-   - Color intensity = number of sets that day
-   - Gray = rest day or no workout
-
-5. Body Weight Log (optional)
-   - Input field: "Log today's weight (kg)"
-   - Saves to a `body_weight` column in `user_progress` as jsonb array
-   - Line chart of weight over time
-
----
-
-### Settings Page `/settings` — UPDATE EXISTING
-
-Keep everything already built. Add:
-
-- Account section: show logged-in email, Logout button
-- Weight unit preference: `kg` / `lbs` (saved to `user_progress.weight_unit`)
-- Rest timer default: number input in seconds (saved to `user_progress.rest_timer_default`)
-- Rest timer vibration: toggle on/off
-- Export all data: download `workout_logs` + `custom_exercises` + `custom_workouts` as JSON
-- Import data: upload JSON, with choice to merge or replace
-- Reset program progress: confirmation dialog → clears `user_progress` + `workout_logs`
-- Delete account: confirmation dialog → deletes all user data + Supabase auth account
-
----
-
-## NAVIGATION — UPDATE
-
-Bottom nav: 6 items
-```
-Home | Workout | History | Exercises | Program | Stats
-```
-
-Settings: gear icon in top-right corner of header (not in bottom nav)
-
----
-
-## SYNC STRATEGY
-
-- `localStorage` = local cache for offline use
-- Supabase = source of truth for all user data
-- On app load:
-  1. Check Supabase session
-  2. Fetch `user_progress` from Supabase → sync to Zustand store
-  3. Fetch last 30 `workout_logs` → cache in localStorage
-- On workout completion → save to Supabase immediately
-- On custom exercise / workout CRUD → save to Supabase immediately
-- If offline (`navigator.onLine === false`):
-  - Save to localStorage only
-  - Queue the write
-  - On `window online` event → flush queue to Supabase
-- Sync status shown in header
-
----
-
-## AUTO-SAVE RULES
-
-- Debounce auto-save to `localStorage` 500ms after any workout input change
-- Force-save to `localStorage` on `beforeunload` event
-- Sync to Supabase only on workout completion (not on every keystroke)
-- Never show a manual Save button in the workout flow
-
----
-
-## PREVIOUS SESSION WEIGHT
-
-When workout page loads, for each exercise:
-1. Search `workout_logs` cache (localStorage) for most recent log containing this exercise ID
-2. Get the last set's weight from that log
-3. Show as placeholder: `Last time: 80kg × 5` below the weight input field
-4. Pre-fill weight input with that value
-
----
-
-## PR DETECTION
-
-On every "Complete Workout":
-1. For each exercise in the session, find the max weight logged in this session
-2. Query all historical `workout_logs` for the same exercise
-3. If session max > all-time max → it's a PR
-4. Show 🏆 badge on that exercise card
-5. Save list of PR exercise names to `workout_logs.pr_exercises`
-6. Show PR exercises in the completion modal
-
----
-
-## NEW UTILITY FILES TO CREATE
-
-```
-src/utils/muscleGroups.js     — muscle group list, color map, icon map
-src/utils/volumeCalc.js       — total volume calculation (weight × reps per set)
-src/utils/prDetection.js      — PR detection logic
-src/utils/plateCalc.js        — plate calculator (weight → plate breakdown)
-src/utils/warmupSets.js       — warm-up set % calculator
-```
-
-### muscleGroups.js color map:
 ```js
-export const MUSCLE_COLORS = {
-  Chest:       { bg: '#FDE8E8', text: '#C0392B' },
-  Back:        { bg: '#E8F4FD', text: '#1A5276' },
-  Shoulders:   { bg: '#FEF9E7', text: '#B7950B' },
-  Biceps:      { bg: '#E8F8F5', text: '#0E6655' },
-  Triceps:     { bg: '#F4ECF7', text: '#7D3C98' },
-  Quads:       { bg: '#EBF5FB', text: '#1F618D' },
-  Hamstrings:  { bg: '#FDF2E9', text: '#CA6F1E' },
-  Glutes:      { bg: '#FDFEFE', text: '#717D7E' },
-  Calves:      { bg: '#E9F7EF', text: '#1E8449' },
-  Core:        { bg: '#FDEDEC', text: '#CB4335' },
-  'Full Body': { bg: '#F2F3F4', text: '#2C3E50' },
-};
+// Load the Google Identity Services + GAPI scripts dynamically (only once)
+export async function loadGoogleScripts() {}
+
+// Open OAuth popup, get access token with Drive file scope
+// Scope needed: https://www.googleapis.com/auth/drive.file
+// (drive.file = only files created by this app, not the user's whole Drive)
+export async function signInWithGoogle() {}
+
+// Sign out / revoke token
+export async function signOutGoogle() {}
+
+// Upload a JSON backup file to a folder called "Fitty Backups" in the user's Drive
+// File name format: fitty-backup-YYYY-MM-DD-HH-MM.json
+// If the folder doesn't exist, create it first
+// Returns the uploaded file's Drive ID
+export async function uploadBackupToDrive(data, accessToken) {}
+
+// List all backup files in the "Fitty Backups" folder, sorted newest first
+// Returns array of { id, name, createdTime }
+export async function listBackupFiles(accessToken) {}
+
+// Download a specific backup file by Drive file ID
+// Returns the parsed JSON object
+export async function downloadBackupFromDrive(fileId, accessToken) {}
+
+// Delete old backups — keep only the 10 most recent files
+// Call this after every successful upload
+export async function pruneOldBackups(accessToken) {}
 ```
 
----
+### `src/components/DriveBackup.jsx` — the UI
 
-## NEW COMPONENTS TO CREATE
+States to handle:
 
-```
-src/components/RestTimer/         — floating countdown bar, vibrate on end, +30s, dismiss
-src/components/SwapExerciseModal/ — 3 tabs: Jeff subs | same muscle | search all
-src/components/WorkoutBuilder/    — exercise picker, drag reorder, superset pairs
-src/components/MuscleGroupBadge/  — colored pill with muscle group name
-src/components/PRBadge/           — 🏆 badge shown on exercise card
-src/components/SyncIndicator/     — ☁️/🔄/📴 in header
-src/components/PlateCalculator/   — modal: enter weight → see plate breakdown
-src/components/CompletionModal/   — shown after "Complete Workout"
-```
+- `idle` — shows "Backup to Google Drive" button
+- `signing_in` — shows spinner, "Connecting to Google Drive…"
+- `backing_up` — shows spinner, "Creating backup…"
+- `success` — shows green checkmark, "Backed up successfully · file name · timestamp"
+- `restoring` — shows spinner, "Restoring from backup…"
+- `error` — shows red banner with the error message
 
----
+Features:
 
-## NEW HOOKS TO CREATE
+- **Backup button**: signs in if not already, then uploads JSON of all data
+- **Restore button**: shows a list of the last 10 backup files with dates, user picks one
+- **Last backup timestamp**: persist to localStorage as `fitty_last_drive_backup`
+  so it survives page refresh
+- **Auto-backup toggle**: a toggle that, when on, triggers a Drive backup automatically
+  after every successful `completeWorkout` call. Store preference in localStorage
+  as `fitty_auto_drive_backup` (boolean)
 
-```
-src/hooks/useSupabaseSync.js   — offline queue, flush on reconnect
-src/hooks/useRestTimer.js      — countdown timer state, vibrate
-src/hooks/usePRDetection.js    — compare current sets against history
-src/hooks/usePrevWeight.js     — fetch previous session weight per exercise
-```
+The data to back up is exactly what `storage.exportData()` already returns.
+The data to restore is passed into `storage.importData()` then `initializeStore()`.
 
----
+### Update `src/pages/SettingsPage.jsx`
 
-## NEW PAGES TO CREATE
+Add a new section called **"Google Drive Backup"** between "Training Preferences" and
+"Program Settings". It should contain the `<DriveBackup />` component.
 
-```
-src/pages/AuthPage.jsx          — login / sign up
-src/pages/ExercisesPage.jsx     — exercise library + CRUD
-src/pages/StatsPage.jsx         — charts and analytics
-```
+### Update `src/store/useWorkoutStore.js`
 
----
+In `completeWorkout`, after the Supabase write succeeds, add:
 
-## UPDATED FILE STRUCTURE
-
-```
-ppl-tracker/
-├── public/
-│   └── manifest.json
-├── src/
-│   ├── data/
-│   │   └── program.json              ← update: add muscleGroup to every exercise
-│   ├── lib/
-│   │   └── supabaseClient.js         ← NEW
-│   ├── store/
-│   │   └── useWorkoutStore.js        ← update: add Supabase sync
-│   ├── components/
-│   │   ├── Header.jsx                ← update: add SyncIndicator + gear icon
-│   │   ├── PhaseIndicator.jsx        ← existing
-│   │   ├── DayCard.jsx               ← existing
-│   │   ├── ExerciseCard.jsx          ← update: add muscle badge, PR badge, swap button
-│   │   ├── ProgressBar.jsx           ← existing
-│   │   ├── RestTimer/                ← NEW
-│   │   ├── SwapExerciseModal/        ← NEW
-│   │   ├── WorkoutBuilder/           ← NEW
-│   │   ├── MuscleGroupBadge/         ← NEW
-│   │   ├── PRBadge/                  ← NEW
-│   │   ├── SyncIndicator/            ← NEW
-│   │   ├── PlateCalculator/          ← NEW
-│   │   └── CompletionModal/          ← NEW
-│   ├── hooks/
-│   │   ├── useSupabaseSync.js        ← NEW
-│   │   ├── useRestTimer.js           ← NEW
-│   │   ├── usePRDetection.js         ← NEW
-│   │   └── usePrevWeight.js          ← NEW
-│   ├── pages/
-│   │   ├── AuthPage.jsx              ← NEW
-│   │   ├── DashboardPage.jsx         ← update
-│   │   ├── WorkoutPage.jsx           ← update
-│   │   ├── HistoryPage.jsx           ← update
-│   │   ├── ExercisesPage.jsx         ← NEW
-│   │   ├── ProgramPage.jsx           ← update: add My Workouts tab + builder
-│   │   ├── StatsPage.jsx             ← NEW
-│   │   └── SettingsPage.jsx          ← update
-│   ├── utils/
-│   │   ├── storage.js                ← existing
-│   │   ├── progressTracker.js        ← existing
-│   │   ├── dayTheme.js               ← existing
-│   │   ├── muscleGroups.js           ← NEW
-│   │   ├── volumeCalc.js             ← NEW
-│   │   ├── prDetection.js            ← NEW
-│   │   ├── plateCalc.js              ← NEW
-│   │   └── warmupSets.js             ← NEW
-│   ├── App.jsx                       ← update: add new routes
-│   └── main.jsx                      ← existing (has ErrorBoundary)
-├── .env                              ← Supabase credentials
-├── .gitignore
-├── vercel.json
-├── package.json
-└── vite.config.js
-```
-
----
-
-## PACKAGES TO INSTALL
-
-```bash
-npm install @supabase/supabase-js date-fns lucide-react @dnd-kit/core @dnd-kit/sortable
-```
-
-Note: `recharts` is already installed.
-
----
-
-## VERCEL CONFIG
-
-Create `vercel.json` at project root:
-```json
-{
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+```js
+// Auto-backup to Drive if the user has enabled it
+const autoDriveBackup =
+  localStorage.getItem("fitty_auto_drive_backup") === "true";
+if (autoDriveBackup) {
+  // Fire and forget — do not await, do not block the completion flow
+  import("../lib/googleDrive").then(
+    ({ uploadBackupToDrive, signInWithGoogle }) => {
+      signInWithGoogle()
+        .then((token) => uploadBackupToDrive(storage.exportData(), token))
+        .catch(console.error);
+    },
+  );
 }
 ```
 
-Add to Vercel project environment variables after deploy:
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+### Definition of done for Task 2
+
+- [ ] `src/lib/googleDrive.js` exists with all five functions implemented
+- [ ] `src/components/DriveBackup.jsx` exists with all states handled
+- [ ] Backup button works: signs in → uploads JSON → shows success with file name
+- [ ] Restore button works: lists files → user picks one → data restored → page reloads
+- [ ] Auto-backup toggle works and persists across page refresh
+- [ ] Last backup time shown in the UI
+- [ ] Old backups pruned to last 10 after each upload
+- [ ] The setup instructions for the OAuth Client ID are printed as a comment block at the
+      top of `src/lib/googleDrive.js` so the developer knows what to do
+- [ ] `npm run build` passes
 
 ---
 
-## IMPLEMENTATION ORDER — SPRINT BY SPRINT
+## TASK 3 — CLEANER WORKOUT LOG UI (faster logging on mobile)
 
-### Sprint 1 — Supabase Foundation
-1. Create `.env` with Supabase credentials
-2. Create `src/lib/supabaseClient.js`
-3. Build `AuthPage.jsx` (login/signup toggle, error handling)
-4. Add route guard to `App.jsx` — redirect to `/auth` if no session
-5. Create all 4 Supabase tables with RLS (run SQL in Supabase dashboard)
-6. Update `useWorkoutStore.js`:
-   - On login: fetch `user_progress` from Supabase, sync to store
-   - On workout complete: save to `workout_logs` in Supabase
-7. Create `SyncIndicator` component, add to `Header.jsx`
-8. Create `useSupabaseSync.js` hook (offline queue + flush on reconnect)
+The current workout page has too many tabs, too many buttons, and too much nesting.
+On a phone mid-workout, you need to log a set in 3 taps. Currently it takes more than that.
 
-### Sprint 2 — Muscle Groups + Exercise Library
-9. Add `muscleGroup` field to every exercise in `program.json`
-10. Create `src/utils/muscleGroups.js` with color map
-11. Create `MuscleGroupBadge` component
-12. Build `ExercisesPage.jsx`:
-    - Tab 1: Jeff Nippard exercises (read-only, from program.json)
-    - Tab 2: My Exercises (CRUD via `custom_exercises` table)
-    - Search + filter by muscle group
-    - Exercise detail view with history chart
-13. Add `/exercises` route to `App.jsx`
-14. Update bottom nav to 6 items
+### Changes to `src/components/Workout/ExerciseCard.jsx`
 
-### Sprint 3 — Enhanced Workout Page
-15. Add `MuscleGroupBadge` to `ExerciseCard`
-16. Add `PRBadge` component
-17. Build `SwapExerciseModal`
-18. Build `RestTimer` component (countdown, vibrate, +30s, dismiss)
-19. Build `usePrevWeight.js` hook — fetch last session weight per exercise
-20. Build `usePRDetection.js` hook — detect PRs on completion
-21. Show "Last time: 80kg × 5" placeholder in workout inputs
-22. Add duration timer to workout header
-23. Add session notes field to workout page
-24. Build `CompletionModal` — shown after complete workout
-25. Add superset visual grouping (A1/A2 bracket)
+**Remove the Track / History / Graph tab bar from the exercise card.**
 
-### Sprint 4 — Custom Workout Builder
-26. Build `WorkoutBuilder` component:
-    - Exercise picker (search + muscle group filter)
-    - Drag-to-reorder using `@dnd-kit`
-    - Superset pair toggle
-    - Save to `custom_workouts`
-27. Update `ProgramPage.jsx`:
-    - "Jeff Nippard" tab (existing)
-    - "My Workouts" tab — list + edit + delete + "Use Today"
-    - "Create Workout" button → opens WorkoutBuilder
-28. "Use This Workout Today" flow → load into workout session
+Replace it with a single collapsed view:
 
-### Sprint 5 — History + Stats
-29. Update `HistoryPage.jsx`:
-    - Filter bar
-    - Volume + muscle group display per card
-    - Edit modal (update Supabase)
-    - PR section at top
-30. Build `StatsPage.jsx`:
-    - Weekly volume by muscle group (stacked bar chart)
-    - Total sets per week (line chart)
-    - PR progress per exercise (line chart with exercise dropdown)
-    - Frequency heatmap (calendar grid)
-    - Body weight log + trend line
-31. Add `/stats` route
+- The card shows exercise name, muscle badge, sets × reps, RPE target
+- The set rows (weight + reps + RPE inputs) are always visible — no tab needed
+- History and Graph are moved to a small "expand" chevron at the bottom right of the card
+  that opens an inline panel below the inputs (not a modal, not a tab)
+- The expand panel shows the history list and the 1RM graph stacked vertically
 
-### Sprint 6 — Pro Features + Polish
-32. Build `PlateCalculator` component (modal, triggered from workout weight input)
-33. Build warm-up set generator (auto-calculate % ramp-up sets)
-34. Add streak tracking to Dashboard (consecutive workout days)
-35. Add 1RM calculator inline on exercise cards (Epley formula)
-36. Update `SettingsPage.jsx` with all new options
-37. Add PWA manifest + service worker
-38. Fix iOS keyboard — `paddingBottom` on scroll container when input is focused
-39. Dark mode audit on all new components
-40. Add `vercel.json`
-41. Final production build test
+This removes one tap per exercise (no longer need to ensure you're on the "Track" tab).
+
+**Make set input rows larger and easier to tap:**
+
+- Input height: minimum `py-2.5` (currently `py-1.5`)
+- Font size: `text-base` (currently `text-sm`)
+- The weight field should be wide enough to show 3 digits comfortably: `w-20` minimum
+- The reps field: `w-16` minimum
+- The RPE field: `w-14` minimum, make it optional visually (lighter placeholder, no label)
+
+**Move secondary actions to a slide-out panel:**
+
+The following buttons are rarely used during an actual workout and add visual noise:
+
+- Swap Exercise
+- Move Up / Move Down
+- Schedule to another day
+- Remove exercise
+
+Move all of them into a `⋮` (three-dot) menu that appears as a small icon in the top-right
+of each exercise card header. Tapping it opens a compact bottom sheet (not a full modal)
+with these four options listed vertically. This cleans up the card header significantly.
+
+**Rest timer button:**
+
+- Replace the current "⏱ Rest (~2 min)" text button with a single icon button
+  that is visually prominent — a circular button with a timer icon, 44×44px tap target
+- Show the rest duration as a small label below the icon
+- Keep the "+ Custom" option in the three-dot menu instead of inline
+
+**Warm-up suggestion:**
+
+- Collapse the warmup block by default. Show "▸ See warm-up suggestion" as a small
+  expandable row. Most users skip warm-up sets — it should not take up permanent space.
+
+**Progression suggestion banner:**
+
+- Keep the green banner but reduce it to a single line with a dismiss ×
+  Currently it can be 2-3 lines tall. Truncate to one line and let users expand if they
+  want to read the full message.
+
+**Session notes:**
+
+- Move the session notes textarea to the very bottom of the page, below all exercise cards,
+  inside a collapsed "Add session notes" row that expands on tap.
+  Currently it always takes up space even when empty.
+
+### Changes to `src/pages/WorkoutPage.jsx`
+
+**Duration timer:**
+
+- Move the elapsed time (MM:SS) from wherever it currently renders to the page header
+  bar next to the workout label — show it as a small badge: `⏱ 24:13`
+- It should not be a separate section — just an inline badge
+
+**Complete Workout button:**
+
+- Make it larger: full width, `py-4`, `text-base font-bold`
+- Change colour to `bg-emerald-600` on active sessions (currently `bg-emerald-600` —
+  confirm this is applied and visible)
+- Add a subtle set-count summary next to the button: "12 sets logged"
+
+**Rest timer floating bar:**
+
+- The `RestTimerBar` component should stick to the bottom above the Complete button,
+  not appear inline between exercise cards
+- It should not push the exercise cards up — overlay the bottom of the page content
+
+**Empty state (no exercises):**
+
+- Currently a plain text message — make it a centered card with a large `+` button
+  that opens the Add Exercise modal directly. Text: "No exercises yet — tap to add"
+
+### Definition of done for Task 3
+
+- [ ] No tab bar on ExerciseCard — inputs always visible
+- [ ] History/Graph accessible via chevron expand, not tabs
+- [ ] Secondary actions (swap, move, remove) are in a three-dot menu
+- [ ] Input rows are min `py-2.5` and `text-base`
+- [ ] Rest timer is a prominent icon button
+- [ ] Warm-up suggestion is collapsed by default
+- [ ] Progression banner fits on one line
+- [ ] Session notes are collapsed by default
+- [ ] Duration timer shown as inline badge in header
+- [ ] Complete button is full width, `py-4`
+- [ ] Rest timer bar overlays bottom, does not push content
+- [ ] Empty state has a large add button
+- [ ] `npm run build` passes
 
 ---
 
-## KEY RULES — READ BEFORE EVERY TASK
+## TASK 4 — FITNOTES IMPORT (low priority, do last)
 
-1. Never rebuild or overwrite anything in the "Already Built" section above
-2. Never delete `program.json` or modify its exercise list — only add `muscleGroup` field
-3. Supabase is the source of truth — localStorage is only a cache
-4. Every new page must be mobile-first and work at 390px width
-5. Dark mode must work on every new component — use Tailwind `dark:` variants
-6. No manual Save buttons in the workout flow — everything auto-saves
-7. All Supabase operations must have try/catch error handling
-8. RLS must be enabled on all tables — users can only access their own data
-9. Test every Sprint by running `npm run build` before moving to the next Sprint
-10. Update `Completed_Tasks.md` after each Sprint with what was done
+The user has a small amount of FitNotes data they may want to import. This is not critical
+but nice to have.
+
+### What FitNotes exports
+
+FitNotes exports a `.zip` file containing a file called `FitNotes_Backup.csv` with this format:
+
+```
+Date,Exercise Category,Exercise Name,Reps,Weight (kg),Distance,Distance Unit,Time
+2024-01-15,Chest,Bench Press,5,80,,
+2024-01-15,Chest,Bench Press,5,80,,
+2024-01-15,Chest,Bench Press,4,80,,
+2024-01-15,Back,Lat Pulldown,10,60,,
+```
+
+One row per set. Multiple rows with the same date and exercise name = multiple sets.
+
+### What to build
+
+**`src/utils/fitnotesImport.js`** — a parser that:
+
+1. Accepts the raw CSV string (the agent does not need to unzip — the user will extract
+   the CSV manually and paste it or select the file)
+2. Groups rows by date, then by exercise name
+3. Maps FitNotes exercise categories to Fitty muscle groups using this mapping:
+
+```js
+const CATEGORY_TO_MUSCLE = {
+  Chest: "Chest",
+  Back: "Back",
+  Shoulders: "Shoulders",
+  Biceps: "Biceps",
+  Triceps: "Triceps",
+  Legs: "Legs",
+  Calves: "Calves",
+  Core: "Core",
+  Cardio: "Full Body",
+  Olympic: "Full Body",
+  Other: "Full Body",
+};
+```
+
+4. Converts each group into a `completedDay` object matching the existing Fitty format:
+
+```js
+{
+  date: '2024-01-15T00:00:00.000Z',
+  phaseId: 'imported',
+  week: 1,
+  dayIndex: 0,
+  label: 'FitNotes Import',
+  workout_name: 'FitNotes Import',
+  exercises: [
+    {
+      exerciseId: 'fitnotes_bench_press',  // slugified exercise name
+      name: 'Bench Press',
+      muscleGroup: 'Chest',
+      sets: [
+        { setNumber: 1, weight: '80', reps: '5', rpe: '' },
+        { setNumber: 2, weight: '80', reps: '5', rpe: '' },
+        { setNumber: 3, weight: '80', reps: '4', rpe: '' },
+      ]
+    }
+  ],
+  sessionNotes: '',
+  durationMinutes: null,
+  prExercises: [],
+}
+```
+
+5. Returns an array of these `completedDay` objects sorted by date ascending
+6. Deduplicates against existing `completedDays` using the same key logic as `mergeCompletedDays`
+
+**`src/pages/SettingsPage.jsx`** — add a "Import from FitNotes" row inside the
+"Export & Data" section:
+
+- A file input that accepts `.csv` files
+- On file select, parse it and show a preview: "Found X workouts from DATE to DATE"
+- A "Import X workouts" confirm button
+- On confirm, merge the imported days into `completedDays` via the store and save
+
+### Definition of done for Task 4
+
+- [ ] `fitnotesImport.js` parses the CSV correctly
+- [ ] Exercises are grouped by date and exercise name correctly
+- [ ] Output matches the Fitty `completedDay` schema
+- [ ] Duplicate dates are not imported twice
+- [ ] Import UI shows a preview before committing
+- [ ] `npm run build` passes
+
+---
+
+## EXECUTION ORDER
+
+Run tasks in this order. Do not start the next task until `npm run build` passes for the current one.
+
+```
+Task 1 → Task 2 → Task 3 → Task 4
+```
+
+After all four tasks are complete, run `npm run build` one final time and fix any remaining
+TypeScript / ESLint errors.
+
+---
+
+## THINGS TO NEVER DO
+
+- Do not remove Supabase or the authentication system
+- Do not delete or modify `src/data/program.json`
+- Do not change the Zustand store's state shape (adding fields is fine, removing is not)
+- Do not introduce new npm packages for Tasks 1 and 3 (use what is already installed)
+- Task 2 may load `https://accounts.google.com/gsi/client` and
+  `https://apis.google.com/js/api.js` dynamically via script tag injection — this is fine
+- Do not use `localStorage.clear()` anywhere
+- Do not show raw Supabase error codes or messages to the user
+
+---
+
+## ACCEPTANCE CRITERIA (overall)
+
+When all four tasks are done, the following must be true:
+
+1. User logs a workout on phone → opens app on laptop → workout is there. No duplicates.
+2. User taps "Backup to Google Drive" in Settings → JSON file appears in their Drive.
+3. User taps "Restore from Google Drive" → picks a file → data is restored.
+4. On a fresh install on a new device, user logs in → sync pulls all their historical data.
+5. If the network is down, workouts save locally and sync automatically when back online.
+6. The workout page allows logging a set in 3 taps: weight field → reps field → next set.
+7. `npm run build` produces zero errors.

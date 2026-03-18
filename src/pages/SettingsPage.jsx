@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../components/AuthProvider'
+import DriveBackup from '../components/DriveBackup'
 import { supabase } from '../lib/supabaseClient'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import { flushSyncQueue, getSyncQueue } from '../utils/syncQueue'
@@ -498,6 +499,18 @@ function SettingsPage() {
           >
             {restTimerVibration ? 'On' : 'Off'}
           </button>
+        </div>
+      </section>
+
+      {/* Google Drive Backup */}
+      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Google Drive Backup</h2>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Create a cloud backup copy of your Fitty data and restore from your recent backups when needed.
+        </p>
+
+        <div className="mt-4">
+          <DriveBackup />
         </div>
       </section>
 

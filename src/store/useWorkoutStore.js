@@ -3,6 +3,7 @@ import { storage } from '../utils/storage'
 import { getNextDay } from '../utils/progressTracker'
 import { supabase } from '../lib/supabaseClient'
 import { clearSyncQueue, enqueueMutation, getSyncQueue } from '../utils/syncQueue'
+import { createWorkoutLogId, getWorkoutLegacySlotKey, toWorkoutDateOnly } from '../utils/workoutLogIdentity'
 import defaultProgram from '../data/program.json'
 
 const BUILT_IN_PROGRAM_ID = 'built_in_default_program'
@@ -12,6 +13,13 @@ let cloudSyncPromise = null
 function isUserProgressColumnMismatch(error) {
   const message = String(error?.message || '')
   return error?.code === 'PGRST204' && message.includes('user_progress')
+}
+
+function isWorkoutLogsDeletedColumnMismatch(error) {
+  const message = String(error?.message || '')
+  return error?.code === 'PGRST204'
+    && message.includes('workout_logs')
+    && message.includes('deleted_at')
 }
 
 function stripLegacyProgressFields(payload) {
@@ -39,19 +47,31 @@ function normalizeRemoteDate(value) {
   return parsed.toISOString()
 }
 
-function normalizeRemoteWorkoutLog(row) {
+function normalizeNullableTimestamp(value) {
+  if (!value) return null
+  return normalizeRemoteDate(value)
+}
+
+function normalizeWorkoutLogEntry(row, { ensureId = false } = {}) {
+  if (!row || typeof row !== 'object') return null
+
   const weekRaw = row?.week_number ?? row?.week
   const dayIndexRaw = row?.day_index ?? row?.dayIndex
   const durationRaw = row?.duration_minutes ?? row?.durationMinutes
-  const notes = row?.notes ?? row?.session_notes ?? ''
+  const notes = row?.notes ?? row?.session_notes ?? row?.sessionNotes ?? ''
   const label = row?.workout_name || row?.day_label || row?.label || 'Workout'
   const prs = Array.isArray(row?.pr_exercises)
     ? row.pr_exercises
     : (Array.isArray(row?.prExercises) ? row.prExercises : [])
 
+  const normalizedDate = normalizeRemoteDate(row?.date)
+  const normalizedUpdatedAt = normalizeRemoteDate(row?.updated_at || row?.updatedAt || row?.created_at || normalizedDate)
+  const normalizedDeletedAt = normalizeNullableTimestamp(row?.deleted_at || row?.deletedAt)
+  const normalizedId = row?.id || (ensureId ? createWorkoutLogId() : undefined)
+
   return {
-    id: row?.id || undefined,
-    date: normalizeRemoteDate(row?.date),
+    id: normalizedId,
+    date: normalizedDate,
     phaseId: row?.phase_id || row?.phaseId || '',
     week: Number.isFinite(Number(weekRaw)) ? Number(weekRaw) : 1,
     dayIndex: Number.isFinite(Number(dayIndexRaw)) ? Number(dayIndexRaw) : 0,
@@ -64,17 +84,46 @@ function normalizeRemoteWorkoutLog(row) {
     duration_minutes: Number.isFinite(Number(durationRaw)) ? Number(durationRaw) : null,
     prExercises: prs,
     pr_exercises: prs,
+    updatedAt: normalizedUpdatedAt,
+    updated_at: normalizedUpdatedAt,
+    deletedAt: normalizedDeletedAt,
+    deleted_at: normalizedDeletedAt,
   }
 }
 
-function getCompletedDayKey(day) {
-  return [
-    String(day?.date || ''),
-    String(day?.phaseId || day?.phase_id || ''),
-    String(day?.week ?? day?.week_number ?? ''),
-    String(day?.dayIndex ?? day?.day_index ?? ''),
-    String(day?.label || day?.workout_name || ''),
-  ].join('|')
+function normalizeLocalWorkoutLogs(days = []) {
+  const local = Array.isArray(days) ? days : []
+
+  const normalized = local
+    .map((day) => normalizeWorkoutLogEntry(day, { ensureId: true }))
+    .filter(Boolean)
+    .filter((day) => !day.deletedAt)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  return {
+    items: normalized,
+    changed: JSON.stringify(normalized) !== JSON.stringify(local),
+  }
+}
+
+function getUpdatedTimestamp(entry) {
+  const value = entry?.updatedAt || entry?.updated_at || entry?.date
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime()
+}
+
+function resolveWorkoutVersion(currentEntry, incomingEntry, { preferIncomingOnTie = false } = {}) {
+  if (!currentEntry) return incomingEntry
+  if (!incomingEntry) return currentEntry
+
+  const currentTs = getUpdatedTimestamp(currentEntry)
+  const incomingTs = getUpdatedTimestamp(incomingEntry)
+
+  if (incomingTs === currentTs) {
+    return preferIncomingOnTie ? incomingEntry : currentEntry
+  }
+
+  return incomingTs > currentTs ? incomingEntry : currentEntry
 }
 
 function getBodyweightKey(entry) {
@@ -96,29 +145,118 @@ function hasPendingDeleteAll(queue, table, userId) {
   })
 }
 
-function mergeCompletedDays(localDays = [], remoteDays = []) {
-  const local = Array.isArray(localDays) ? localDays : []
-  const remote = Array.isArray(remoteDays) ? remoteDays : []
+function getPendingWorkoutOverlays(queue = []) {
+  const jobs = Array.isArray(queue) ? queue : []
+  const nowIso = new Date().toISOString()
 
-  const mergedByKey = new Map()
+  return jobs
+    .filter((job) => job?.table === 'workout_logs')
+    .map((job) => {
+      if (job?.action === 'upsert' && job?.payload && typeof job.payload === 'object') {
+        return normalizeWorkoutLogEntry(job.payload, { ensureId: true })
+      }
 
-  remote.forEach((day) => {
-    mergedByKey.set(getCompletedDayKey(day), day)
-  })
+      if (job?.action === 'update' && job?.match?.id && job?.payload && typeof job.payload === 'object') {
+        return normalizeWorkoutLogEntry({
+          ...job.payload,
+          id: job.match.id,
+        }, { ensureId: true })
+      }
 
-  local.forEach((day) => {
-    const key = getCompletedDayKey(day)
-    if (!mergedByKey.has(key)) {
-      mergedByKey.set(key, day)
+      if (job?.action === 'update' && job?.match && typeof job.match === 'object') {
+        const date = job.match.date || job.payload?.date
+        const phaseId = job.match.phase_id || job.payload?.phase_id
+        const weekNumber = job.match.week_number ?? job.payload?.week_number
+        const dayIndex = job.match.day_index ?? job.payload?.day_index
+
+        if (date && phaseId && Number.isFinite(Number(weekNumber)) && Number.isFinite(Number(dayIndex))) {
+          return normalizeWorkoutLogEntry({
+            ...job.payload,
+            date,
+            phase_id: phaseId,
+            week_number: Number(weekNumber),
+            day_index: Number(dayIndex),
+            updated_at: job.payload?.updated_at || nowIso,
+            deleted_at: job.payload?.deleted_at || null,
+          }, { ensureId: true })
+        }
+      }
+
+      if (job?.action === 'delete' && job?.match?.id) {
+        return normalizeWorkoutLogEntry({
+          id: job.match.id,
+          date: nowIso,
+          updated_at: nowIso,
+          deleted_at: nowIso,
+        }, { ensureId: true })
+      }
+
+      return null
+    })
+    .filter(Boolean)
+}
+
+function mergeCompletedDays(localDays = [], remoteDays = [], { preferLocal = false } = {}) {
+  const local = (Array.isArray(localDays) ? localDays : [])
+    .map((day) => normalizeWorkoutLogEntry(day, { ensureId: true }))
+    .filter(Boolean)
+
+  const remote = (Array.isArray(remoteDays) ? remoteDays : [])
+    .map((day) => normalizeWorkoutLogEntry(day, { ensureId: false }))
+    .filter(Boolean)
+
+  const mergedByIdentity = new Map()
+  const legacyIdentityByKey = new Map()
+
+  const registerEntry = (entry, source) => {
+    const legacyKey = getWorkoutLegacySlotKey(entry)
+    const identityKey = entry.id ? `id:${entry.id}` : `legacy:${legacyKey}`
+    const existingKey = mergedByIdentity.has(identityKey)
+      ? identityKey
+      : legacyIdentityByKey.get(legacyKey)
+
+    if (!existingKey) {
+      const withId = entry.id ? entry : { ...entry, id: createWorkoutLogId() }
+      const normalizedIdentityKey = `id:${withId.id}`
+      mergedByIdentity.set(normalizedIdentityKey, withId)
+      legacyIdentityByKey.set(legacyKey, normalizedIdentityKey)
+      return
     }
-  })
 
-  const merged = [...mergedByKey.values()]
+    const existing = mergedByIdentity.get(existingKey)
+    const incoming = existing?.id
+      ? { ...entry, id: existing.id }
+      : entry
+
+    const winner = resolveWorkoutVersion(existing, incoming, {
+      preferIncomingOnTie: preferLocal && source === 'local',
+    })
+
+    const withId = winner.id ? winner : { ...winner, id: existing?.id || createWorkoutLogId() }
+    const winnerKey = `id:${withId.id}`
+
+    if (winnerKey !== existingKey) {
+      mergedByIdentity.delete(existingKey)
+    }
+
+    mergedByIdentity.set(winnerKey, withId)
+    legacyIdentityByKey.set(legacyKey, winnerKey)
+  }
+
+  remote.forEach((entry) => registerEntry(entry, 'remote'))
+  local.forEach((entry) => registerEntry(entry, 'local'))
+
+  const merged = [...mergedByIdentity.values()]
+    .filter((entry) => !entry.deletedAt)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  const localComparable = local
+    .filter((entry) => !entry.deletedAt)
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
   return {
     items: merged,
-    changed: JSON.stringify(merged) !== JSON.stringify(local),
+    changed: JSON.stringify(merged) !== JSON.stringify(localComparable),
   }
 }
 
@@ -371,18 +509,78 @@ async function fetchProgressFromSupabase(userId) {
 
 async function fetchWorkoutLogsFromSupabase(userId) {
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('workout_logs')
       .select('*')
       .eq('user_id', userId)
+      .is('deleted_at', null)
       .order('date', { ascending: true })
+
+    if (error && isWorkoutLogsDeletedColumnMismatch(error)) {
+      const fallback = await supabase
+        .from('workout_logs')
+        .select('*')
+        .eq('user_id', userId)
+        .order('date', { ascending: true })
+
+      data = fallback.data
+      error = fallback.error
+    }
 
     if (error) throw error
 
-    return (Array.isArray(data) ? data : []).map(normalizeRemoteWorkoutLog)
+    return (Array.isArray(data) ? data : [])
+      .map((row) => normalizeWorkoutLogEntry(row, { ensureId: false }))
+      .filter(Boolean)
   } catch (err) {
     console.error('Supabase workout log fetch error:', err)
     return null
+  }
+}
+
+function buildWorkoutLogPayload(userId, day) {
+  const normalized = normalizeWorkoutLogEntry(day, { ensureId: true })
+  const updatedAt = normalized.updatedAt || normalizeRemoteDate(new Date().toISOString())
+
+  return {
+    id: normalized.id,
+    user_id: userId,
+    date: toWorkoutDateOnly(normalized.date),
+    phase_id: normalized.phaseId || null,
+    week_number: normalized.week,
+    day_index: normalized.dayIndex,
+    day_label: normalized.label || null,
+    workout_name: normalized.label || null,
+    exercises: Array.isArray(normalized.exercises) ? normalized.exercises : [],
+    notes: normalized.sessionNotes || normalized.session_notes || null,
+    duration_minutes: normalized.durationMinutes,
+    pr_exercises: Array.isArray(normalized.prExercises) ? normalized.prExercises : [],
+    updated_at: updatedAt,
+    deleted_at: normalized.deletedAt || null,
+  }
+}
+
+async function upsertWorkoutLogToSupabase(payload) {
+  try {
+    if (!navigator.onLine) {
+      enqueueMutation('workout_logs', 'upsert', payload)
+      return { offline: true }
+    }
+
+    const { error } = await supabase
+      .from('workout_logs')
+      .upsert(payload, { onConflict: 'id' })
+
+    if (error) {
+      enqueueMutation('workout_logs', 'upsert', payload)
+      return { error, queued: true }
+    }
+
+    return { ok: true }
+  } catch (err) {
+    console.error('Workout log upsert failed, queueing retry:', err)
+    enqueueMutation('workout_logs', 'upsert', payload)
+    return { error: err, queued: true }
   }
 }
 
@@ -510,6 +708,10 @@ export const useWorkoutStore = create((set, get) => ({
         fetchProgramCustomizationsFromSupabase(session.user.id),
       ])
 
+      const activeRemoteWorkouts = Array.isArray(remoteWorkouts)
+        ? remoteWorkouts.filter((day) => !day?.deletedAt)
+        : remoteWorkouts
+
       const pendingQueue = getSyncQueue()
       const hasPendingProgressWrites = hasPendingMutation(pendingQueue, 'user_progress')
       const hasPendingWorkoutWrites = hasPendingMutation(pendingQueue, 'workout_logs')
@@ -571,8 +773,8 @@ export const useWorkoutStore = create((set, get) => ({
           storage.saveDismissedAlerts(normalizedDismissedAlerts)
           statePatch.dismissedAlerts = normalizedDismissedAlerts
         }
-      } else if (!hasPendingProgressWrites && !hasPendingProgressDeleteAll && remoteWorkouts && remoteWorkouts.length > 0) {
-        const lastWorkout = remoteWorkouts[remoteWorkouts.length - 1]
+      } else if (!hasPendingProgressWrites && !hasPendingProgressDeleteAll && activeRemoteWorkouts && activeRemoteWorkouts.length > 0) {
+        const lastWorkout = activeRemoteWorkouts[activeRemoteWorkouts.length - 1]
         if (lastWorkout.phaseId) {
           const nextDay = getNextDay(activeProgram, lastWorkout.phaseId, lastWorkout.week, lastWorkout.dayIndex)
           if (nextDay && isValidProgress(activeProgram, { currentPhaseId: nextDay.phaseId, currentWeek: nextDay.week, currentDayIndex: nextDay.dayIndex })) {
@@ -593,15 +795,22 @@ export const useWorkoutStore = create((set, get) => ({
         hasRemoteError = true
       } else {
         const localCompletedDays = get().completedDays
+        const pendingWorkoutOverlays = hasPendingWorkoutWrites
+          ? getPendingWorkoutOverlays(pendingQueue)
+          : []
+
+        const localWorkoutBaseline = pendingWorkoutOverlays.length > 0
+          ? mergeCompletedDays(localCompletedDays, pendingWorkoutOverlays, { preferLocal: true }).items
+          : localCompletedDays
 
         if (!hasPendingWorkoutDeleteAll) {
-          const nextCompletedDays = hasPendingWorkoutWrites
-            ? mergeCompletedDays(localCompletedDays, remoteWorkouts).items
-            : remoteWorkouts
+          const mergedWorkouts = mergeCompletedDays(localWorkoutBaseline, remoteWorkouts, {
+            preferLocal: hasPendingWorkoutWrites,
+          })
 
-          if (JSON.stringify(nextCompletedDays) !== JSON.stringify(localCompletedDays)) {
-            storage.saveCompletedDays(nextCompletedDays)
-            statePatch.completedDays = nextCompletedDays
+          if (mergedWorkouts.changed) {
+            storage.saveCompletedDays(mergedWorkouts.items)
+            statePatch.completedDays = mergedWorkouts.items
           }
         }
       }
@@ -643,8 +852,8 @@ export const useWorkoutStore = create((set, get) => ({
       const shouldApplyCloudResetDefaults = !hasPendingProgressWrites
         && !hasPendingProgressDeleteAll
         && !remoteProgress
-        && Array.isArray(remoteWorkouts)
-        && remoteWorkouts.length === 0
+        && Array.isArray(activeRemoteWorkouts)
+        && activeRemoteWorkouts.length === 0
         && Array.isArray(remoteBodyweight)
         && remoteBodyweight.length === 0
         && remoteCustomizations
@@ -675,7 +884,7 @@ export const useWorkoutStore = create((set, get) => ({
       const result = {
         ok: !hasRemoteError,
         offline: false,
-        pulledWorkouts: Array.isArray(remoteWorkouts) ? remoteWorkouts.length : 0,
+        pulledWorkouts: Array.isArray(activeRemoteWorkouts) ? activeRemoteWorkouts.length : 0,
       }
       return result
     })().catch((err) => {
@@ -733,7 +942,11 @@ export const useWorkoutStore = create((set, get) => ({
     }
 
     if (savedCompletedDays) {
-      set({ completedDays: savedCompletedDays })
+      const migratedCompletedDays = normalizeLocalWorkoutLogs(savedCompletedDays)
+      if (migratedCompletedDays.changed) {
+        storage.saveCompletedDays(migratedCompletedDays.items)
+      }
+      set({ completedDays: migratedCompletedDays.items })
     }
     
     if (savedBodyweight) {
@@ -1133,21 +1346,38 @@ export const useWorkoutStore = create((set, get) => ({
   updateTodayWorkout: async (workoutData, metadata = {}) => {
     const { completedDays } = get()
     const todayStr = new Date().toISOString().split('T')[0]
-    const existingIndex = completedDays.findIndex(d => d.date.startsWith(todayStr))
+    const targetPhaseId = metadata.phaseId
+    const targetWeek = Number.isFinite(Number(metadata.week)) ? Number(metadata.week) : null
+    const targetDayIndex = Number.isFinite(Number(metadata.dayIndex)) ? Number(metadata.dayIndex) : null
+
+    const existingIndex = completedDays.findIndex((day) => {
+      if (!day?.date?.startsWith(todayStr)) return false
+
+      if (targetPhaseId && targetWeek !== null && targetDayIndex !== null) {
+        return day.phaseId === targetPhaseId
+          && Number(day.week) === targetWeek
+          && Number(day.dayIndex) === targetDayIndex
+      }
+
+      return true
+    })
     
     if (existingIndex === -1) return
 
+    const existingDay = normalizeWorkoutLogEntry(completedDays[existingIndex], { ensureId: true })
+    const updatedAt = normalizeRemoteDate(new Date().toISOString())
+
     const prExercises = Array.isArray(metadata.prExercises)
       ? metadata.prExercises
-      : (completedDays[existingIndex].prExercises || completedDays[existingIndex].pr_exercises || [])
+      : (existingDay.prExercises || existingDay.pr_exercises || [])
     const durationMinutes = Number.isFinite(metadata.durationMinutes)
       ? metadata.durationMinutes
-      : (completedDays[existingIndex].durationMinutes || completedDays[existingIndex].duration_minutes || null)
-    const sessionNotes = metadata.sessionNotes ?? completedDays[existingIndex].sessionNotes ?? completedDays[existingIndex].session_notes ?? ''
-    const workoutLabel = metadata.workoutLabel || completedDays[existingIndex].label || completedDays[existingIndex].workout_name || 'Workout'
+      : (existingDay.durationMinutes || existingDay.duration_minutes || null)
+    const sessionNotes = metadata.sessionNotes ?? existingDay.sessionNotes ?? existingDay.session_notes ?? ''
+    const workoutLabel = metadata.workoutLabel || existingDay.label || existingDay.workout_name || 'Workout'
 
-    const updatedDay = {
-      ...completedDays[existingIndex],
+    const updatedDay = normalizeWorkoutLogEntry({
+      ...existingDay,
       label: workoutLabel,
       workout_name: workoutLabel,
       exercises: workoutData,
@@ -1157,7 +1387,9 @@ export const useWorkoutStore = create((set, get) => ({
       duration_minutes: durationMinutes,
       prExercises,
       pr_exercises: prExercises,
-    }
+      updated_at: updatedAt,
+      deleted_at: null,
+    }, { ensureId: true })
 
     const newCompletedDays = [...completedDays]
     newCompletedDays[existingIndex] = updatedDay
@@ -1168,38 +1400,9 @@ export const useWorkoutStore = create((set, get) => ({
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
       set({ syncStatus: 'syncing' })
-      const logPayload = {
-        user_id: session.user.id,
-        date: updatedDay.date,
-        workout_name: updatedDay.label,
-        exercises: updatedDay.exercises,
-        notes: updatedDay.sessionNotes || null,
-        duration_minutes: updatedDay.durationMinutes,
-        pr_exercises: updatedDay.prExercises || [],
-        week_number: updatedDay.week,
-        day_index: updatedDay.dayIndex,
-        day_label: updatedDay.label,
-        phase_id: updatedDay.phaseId,
-      }
-      
-      const { error } = await supabase
-        .from('workout_logs')
-        .update({
-          workout_name: logPayload.workout_name,
-          exercises: logPayload.exercises,
-          notes: logPayload.notes,
-          duration_minutes: logPayload.duration_minutes,
-          pr_exercises: logPayload.pr_exercises,
-        })
-        .match({ user_id: session.user.id, date: updatedDay.date })
-        
-      if (error) {
-        enqueueMutation('workout_logs', 'update', logPayload, {
-          user_id: session.user.id,
-          date: updatedDay.date,
-        })
-      }
-      set({ syncStatus: 'saved' })
+      const logPayload = buildWorkoutLogPayload(session.user.id, updatedDay)
+      const sync = await upsertWorkoutLogToSupabase(logPayload)
+      set({ syncStatus: sync.offline ? 'offline' : (sync.error ? 'error' : 'saved') })
     }
   },
 
@@ -1215,9 +1418,11 @@ export const useWorkoutStore = create((set, get) => ({
 
     // Save workout to completed days
     const workoutLabel = metadata.workoutLabel || currentDay.label
+    const nowIso = normalizeRemoteDate(new Date().toISOString())
 
-    const completedDay = {
-      date: new Date().toISOString(),
+    const completedDay = normalizeWorkoutLogEntry({
+      id: createWorkoutLogId(),
+      date: nowIso,
       phaseId: currentPhaseId,
       week: currentWeek,
       dayIndex: currentDayIndex,
@@ -1230,7 +1435,9 @@ export const useWorkoutStore = create((set, get) => ({
       duration_minutes: Number.isFinite(metadata.durationMinutes) ? metadata.durationMinutes : null,
       prExercises: Array.isArray(metadata.prExercises) ? metadata.prExercises : [],
       pr_exercises: Array.isArray(metadata.prExercises) ? metadata.prExercises : [],
-    }
+      updated_at: nowIso,
+      deleted_at: null,
+    }, { ensureId: true })
 
     const newCompletedDays = [...completedDays, completedDay]
     storage.saveCompletedDays(newCompletedDays)
@@ -1238,57 +1445,64 @@ export const useWorkoutStore = create((set, get) => ({
     const { program } = get()
     const next = getNextDay(program, currentPhaseId, currentWeek, currentDayIndex)
 
-    if (!next) {
+    const nextProgress = next
+      ? {
+          currentPhaseId: next.phaseId,
+          currentWeek: next.week,
+          currentDayIndex: next.dayIndex,
+        }
+      : null
+
+    if (nextProgress) {
+      storage.saveProgress(nextProgress)
+      set({ ...nextProgress, completedDays: newCompletedDays })
+    } else {
       set({ completedDays: newCompletedDays })
-      return
     }
-
-    const newProgress = {
-      currentPhaseId: next.phaseId,
-      currentWeek: next.week,
-      currentDayIndex: next.dayIndex,
-    }
-
-    storage.saveProgress(newProgress)
-    set({ ...newProgress, completedDays: newCompletedDays })
 
     // Sync new progress to Supabase
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
       set({ syncStatus: 'syncing' })
 
-      // Push history log (if offline, queue it. if fetch fails, queue it)
-      const logPayload = {
-        user_id: session.user.id,
-        date: completedDay.date,
-        workout_name: completedDay.label,
-        exercises: completedDay.exercises,
-        notes: completedDay.sessionNotes || null,
-        duration_minutes: completedDay.durationMinutes,
-        pr_exercises: completedDay.prExercises || [],
-        week_number: completedDay.week,
-        day_index: completedDay.dayIndex,
-        day_label: completedDay.label,
-        phase_id: completedDay.phaseId,
-      }
-
-      if (!navigator.onLine) {
-        enqueueMutation('workout_logs', 'insert', logPayload)
-      } else {
-        const { error } = await supabase.from('workout_logs').insert(logPayload)
-        if (error) {
-          console.warn('Network error logging workout, queuing it:', error)
-          enqueueMutation('workout_logs', 'insert', logPayload)
-        }
-      }
+      const logPayload = buildWorkoutLogPayload(session.user.id, completedDay)
+      const workoutSync = await upsertWorkoutLogToSupabase(logPayload)
 
       const state = get()
-      const res = await syncProgressToSupabase(session.user.id, newProgress, state.programStart, {
+      const progressForSync = nextProgress || {
+        currentPhaseId,
+        currentWeek,
+        currentDayIndex,
+      }
+
+      const progressSync = await syncProgressToSupabase(session.user.id, progressForSync, state.programStart, {
         weightUnit: state.weightUnit,
         restTimerDefault: state.restTimerDefault,
         dismissedAlerts: state.dismissedAlerts,
       })
-      set({ syncStatus: res.offline ? 'offline' : (res.error ? 'error' : 'saved') })
+
+      const workoutWriteSucceeded = !workoutSync.offline && !workoutSync.error
+      if (workoutWriteSucceeded) {
+        // Auto-backup to Drive if the user has enabled it.
+        const autoDriveBackup = localStorage.getItem('fitty_auto_drive_backup') === 'true'
+        if (autoDriveBackup) {
+          import('../lib/googleDrive')
+            .then(({ uploadBackupToDrive, signInWithGoogle }) => {
+              signInWithGoogle()
+                .then((token) => uploadBackupToDrive(storage.exportData(), token))
+                .catch((error) => {
+                  console.error('Auto Google Drive backup failed:', error)
+                })
+            })
+            .catch((error) => {
+              console.error('Failed to load Google Drive backup module:', error)
+            })
+        }
+      }
+
+      const isOffline = Boolean(workoutSync.offline || progressSync.offline)
+      const hasError = Boolean(workoutSync.error || progressSync.error)
+      set({ syncStatus: isOffline ? 'offline' : (hasError ? 'error' : 'saved') })
     }
 
     if (metadata.clearScheduledForCurrentDay !== false) {

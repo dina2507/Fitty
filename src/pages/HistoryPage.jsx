@@ -9,6 +9,7 @@ import { calculateWorkoutVolume } from '../utils/volumeCalc'
 import { getHistoricalPRs } from '../hooks/usePRDetection'
 import { calculate1RM } from '../utils/oneRepMax'
 import { storage } from '../utils/storage'
+import { createWorkoutLogId, toWorkoutDateOnly } from '../utils/workoutLogIdentity'
 import { buildWorkoutHistoryCSV, downloadCsvFile } from '../utils/csvExport'
 import { generateMonthlyPDF } from '../utils/pdfExport'
 
@@ -306,6 +307,29 @@ function HistoryPage() {
     useWorkoutStore.setState({ completedDays: next })
   }
 
+  const buildHistoryLogPayload = (log, userId, nowIso, { deletedAt = null } = {}) => {
+    const dateOnly = toWorkoutDateOnly(log?.date)
+
+    return {
+      id: log?.id || createWorkoutLogId(),
+      user_id: userId,
+      date: dateOnly,
+      phase_id: log?.phaseId || null,
+      week_number: Number.isFinite(Number(log?.week)) ? Number(log.week) : null,
+      day_index: Number.isFinite(Number(log?.dayIndex)) ? Number(log.dayIndex) : null,
+      day_label: log?.label || log?.workout_name || 'Workout',
+      workout_name: log?.label || log?.workout_name || 'Workout',
+      exercises: Array.isArray(log?.exercises) ? log.exercises : [],
+      notes: log?.sessionNotes || log?.session_notes || null,
+      duration_minutes: log?.durationMinutes || log?.duration_minutes || null,
+      pr_exercises: Array.isArray(log?.prExercises)
+        ? log.prExercises
+        : (Array.isArray(log?.pr_exercises) ? log.pr_exercises : []),
+      updated_at: nowIso,
+      deleted_at: deletedAt,
+    }
+  }
+
   const handleDelete = async (entry) => {
     const { item, originalIndex } = entry
     if (!window.confirm('Delete this workout? This action cannot be undone.')) return
@@ -317,21 +341,51 @@ function HistoryPage() {
 
     try {
       if (user?.id) {
-        const dateOnly = formatDateOnly(item.date)
-        const matchCriteria = item.id
-          ? { id: item.id }
-          : { user_id: user.id, date: dateOnly }
+        const nowIso = new Date().toISOString()
 
         if (!navigator.onLine) {
-          enqueueMutation('workout_logs', 'delete', null, matchCriteria)
+          if (item.id) {
+            const payload = buildHistoryLogPayload(item, user.id, nowIso, { deletedAt: nowIso })
+            enqueueMutation('workout_logs', 'upsert', payload)
+          } else {
+            const fallbackDateOnly = formatDateOnly(item.date)
+            const fallbackMatch = {
+              user_id: user.id,
+              date: fallbackDateOnly,
+              phase_id: item.phaseId,
+              week_number: item.week,
+              day_index: item.dayIndex,
+            }
+            enqueueMutation('workout_logs', 'update', { deleted_at: nowIso, updated_at: nowIso }, fallbackMatch)
+          }
         } else {
-          const { error } = await supabase
-            .from('workout_logs')
-            .delete()
-            .match(matchCriteria)
+          if (item.id) {
+            const payload = buildHistoryLogPayload(item, user.id, nowIso, { deletedAt: nowIso })
+            const { error } = await supabase
+              .from('workout_logs')
+              .upsert(payload, { onConflict: 'id' })
 
-          if (error) {
-            enqueueMutation('workout_logs', 'delete', null, matchCriteria)
+            if (error) {
+              enqueueMutation('workout_logs', 'upsert', payload)
+            }
+          } else {
+            const fallbackDateOnly = formatDateOnly(item.date)
+            const fallbackMatch = {
+              user_id: user.id,
+              date: fallbackDateOnly,
+              phase_id: item.phaseId,
+              week_number: item.week,
+              day_index: item.dayIndex,
+            }
+
+            const { error } = await supabase
+              .from('workout_logs')
+              .update({ deleted_at: nowIso, updated_at: nowIso })
+              .match(fallbackMatch)
+
+            if (error) {
+              enqueueMutation('workout_logs', 'update', { deleted_at: nowIso, updated_at: nowIso }, fallbackMatch)
+            }
           }
         }
       }
@@ -384,41 +438,33 @@ function HistoryPage() {
     if (!editing) return
     setIsSavingEdit(true)
 
+    const nowIso = new Date().toISOString()
+    const updatedDraft = {
+      ...editing.draft,
+      id: editing.draft.id || createWorkoutLogId(),
+      updatedAt: nowIso,
+      updated_at: nowIso,
+      deletedAt: null,
+      deleted_at: null,
+    }
+
     const next = [...completedDays]
-    next[editing.originalIndex] = editing.draft
+    next[editing.originalIndex] = updatedDraft
     setCompletedDays(next)
 
     try {
       if (user?.id) {
-        const dateOnly = formatDateOnly(editing.draft.date)
-        const matchCriteria = editing.draft.id
-          ? { id: editing.draft.id }
-          : { user_id: user.id, date: dateOnly }
-
-        const logPayload = {
-          user_id: user.id,
-          date: dateOnly,
-          exercises: editing.draft.exercises || [],
-          notes: editing.draft.sessionNotes || editing.draft.session_notes || null,
-          duration_minutes: editing.draft.durationMinutes || editing.draft.duration_minutes || null,
-          pr_exercises: editing.draft.prExercises || editing.draft.pr_exercises || [],
-        }
+        const logPayload = buildHistoryLogPayload(updatedDraft, user.id, nowIso, { deletedAt: null })
 
         if (!navigator.onLine) {
-          enqueueMutation('workout_logs', 'update', logPayload, matchCriteria)
+          enqueueMutation('workout_logs', 'upsert', logPayload)
         } else {
           const { error } = await supabase
             .from('workout_logs')
-            .update({
-              exercises: logPayload.exercises,
-              notes: logPayload.notes,
-              duration_minutes: logPayload.duration_minutes,
-              pr_exercises: logPayload.pr_exercises,
-            })
-            .match(matchCriteria)
+            .upsert(logPayload, { onConflict: 'id' })
 
           if (error) {
-            enqueueMutation('workout_logs', 'update', logPayload, matchCriteria)
+            enqueueMutation('workout_logs', 'upsert', logPayload)
           }
         }
       }

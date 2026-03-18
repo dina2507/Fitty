@@ -39,7 +39,7 @@ function DayCard({ day, isActive = false, isCompleted = false, onClick }) {
       </p>
 
       <div className="mt-3 flex items-center justify-between">
-        <span className="text-xs text-zinc-500">Tap to jump</span>
+        <span className="text-xs text-zinc-500">Tap to select day</span>
         {isCompleted && (
           <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
             Completed
