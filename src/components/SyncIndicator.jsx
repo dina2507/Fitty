@@ -16,7 +16,7 @@ function SyncIndicator() {
   }
 
   const config = statusConfig[syncStatus] || statusConfig.saved
-  const showRetryButton = syncStatus !== 'syncing'
+  const showRetryButton = syncStatus === 'error' || syncStatus === 'offline' || pendingCount > 0
 
   const refreshPendingCount = useCallback(() => {
     setPendingCount(getSyncQueue().length)
