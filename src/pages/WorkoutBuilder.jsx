@@ -4,6 +4,7 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from 
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../components/AuthProvider'
+import { useWorkoutStore } from '../store/useWorkoutStore'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import { MUSCLE_GROUPS } from '../utils/muscleGroups'
 import program from '../data/program.json'
@@ -32,7 +33,7 @@ function ensureUniqueExerciseIds(exercises = []) {
   })
 }
 
-// Flat list of all Jeff Nippard exercises
+// Flat list of all Dina Workout plan exercises
 const ALL_PROGRAM_EXERCISES = (() => {
   const map = new Map()
   program.phases.forEach(phase => phase.weeks.forEach(week => week.days.forEach(day => day.exercises.forEach(ex => {
@@ -44,6 +45,7 @@ const ALL_PROGRAM_EXERCISES = (() => {
 // ── Exercise Library Modal ──
 function ExercisePickerModal({ onAdd, onClose, excludeIds }) {
   const { user } = useAuth()
+  const planDisplayName = useWorkoutStore((state) => state.planDisplayName)
   const [tab, setTab] = useState('program')
   const [search, setSearch] = useState('')
   const [muscleFilter, setMuscleFilter] = useState('All')
@@ -97,7 +99,7 @@ function ExercisePickerModal({ onAdd, onClose, excludeIds }) {
 
         <div className="p-4 flex flex-col gap-3">
           <div className="flex gap-1 rounded-xl bg-zinc-200 p-1">
-            <button onClick={() => setTab('program')} className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${tab === 'program' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-600 hover:text-zinc-900'}`}>Jeff Nippard</button>
+            <button onClick={() => setTab('program')} className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${tab === 'program' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-600 hover:text-zinc-900'}`}>{planDisplayName}</button>
             <button onClick={() => setTab('custom')} className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${tab === 'custom' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-600 hover:text-zinc-900'}`}>My Exercises</button>
           </div>
           <div className="grid gap-2 sm:grid-cols-[1fr_auto]">

@@ -3,7 +3,9 @@ const STORAGE_KEYS = {
   COMPLETED_DAYS: 'ppl_tracker_completed_days',
   PROGRAM_START: 'ppl_tracker_program_start',
   BODYWEIGHT_LOGS: 'ppl_tracker_bodyweight_logs',
+  PLAN_DISPLAY_NAME: 'ppl_tracker_plan_display_name',
   PROGRAM_CUSTOMIZATIONS: 'ppl_tracker_program_customizations',
+  SCHEDULED_EXERCISES: 'ppl_tracker_scheduled_exercises',
   WEIGHT_UNIT: 'ppl_tracker_weight_unit',
   REST_TIMER_DEFAULT: 'ppl_tracker_rest_timer_default',
   REST_TIMER_VIBRATION: 'ppl_tracker_rest_timer_vibration',
@@ -46,6 +48,16 @@ export const storage = {
     localStorage.setItem(STORAGE_KEYS.BODYWEIGHT_LOGS, JSON.stringify(logs))
   },
 
+  getPlanDisplayName() {
+    const value = localStorage.getItem(STORAGE_KEYS.PLAN_DISPLAY_NAME)
+    return value?.trim() || 'Dina Workout plan'
+  },
+
+  savePlanDisplayName(name) {
+    const normalized = String(name || '').trim() || 'Dina Workout plan'
+    localStorage.setItem(STORAGE_KEYS.PLAN_DISPLAY_NAME, normalized)
+  },
+
   getProgramCustomizations() {
     const data = localStorage.getItem(STORAGE_KEYS.PROGRAM_CUSTOMIZATIONS)
     return data ? JSON.parse(data) : {}
@@ -53,6 +65,24 @@ export const storage = {
 
   saveProgramCustomizations(customizations) {
     localStorage.setItem(STORAGE_KEYS.PROGRAM_CUSTOMIZATIONS, JSON.stringify(customizations))
+  },
+
+  getScheduledExercises() {
+    const data = localStorage.getItem(STORAGE_KEYS.SCHEDULED_EXERCISES)
+    if (!data) return []
+    try {
+      const parsed = JSON.parse(data)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  },
+
+  saveScheduledExercises(items) {
+    localStorage.setItem(
+      STORAGE_KEYS.SCHEDULED_EXERCISES,
+      JSON.stringify(Array.isArray(items) ? items : []),
+    )
   },
 
   getWeightUnit() {
@@ -108,7 +138,9 @@ export const storage = {
       completedDays: this.getCompletedDays(),
       programStart: this.getProgramStart(),
       bodyweightLogs: this.getBodyweightLogs(),
+      planDisplayName: this.getPlanDisplayName(),
       programCustomizations: this.getProgramCustomizations(),
+      scheduledExercises: this.getScheduledExercises(),
       weightUnit: this.getWeightUnit(),
       restTimerDefault: this.getRestTimerDefault(),
       restTimerVibration: this.getRestTimerVibration(),
@@ -121,7 +153,9 @@ export const storage = {
     if (data.completedDays) this.saveCompletedDays(data.completedDays)
     if (data.programStart) this.saveProgramStart(data.programStart)
     if (data.bodyweightLogs) this.saveBodyweightLogs(data.bodyweightLogs)
+    if (data.planDisplayName) this.savePlanDisplayName(data.planDisplayName)
     if (data.programCustomizations) this.saveProgramCustomizations(data.programCustomizations)
+    if (Array.isArray(data.scheduledExercises)) this.saveScheduledExercises(data.scheduledExercises)
     if (data.weightUnit) this.saveWeightUnit(data.weightUnit)
     if (data.restTimerDefault) this.saveRestTimerDefault(data.restTimerDefault)
     if (typeof data.restTimerVibration === 'boolean') this.saveRestTimerVibration(data.restTimerVibration)

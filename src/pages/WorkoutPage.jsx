@@ -30,10 +30,14 @@ function WorkoutPage() {
   const completeWorkout = useWorkoutStore((state) => state.completeWorkout)
   const updateTodayWorkout = useWorkoutStore((state) => state.updateTodayWorkout)
   const skipDay = useWorkoutStore((state) => state.skipDay)
+  const loadCustomWorkoutTemplate = useWorkoutStore((state) => state.loadCustomWorkoutTemplate)
   const completedDays = useWorkoutStore((state) => state.completedDays)
   const weightUnit = useWorkoutStore((state) => state.weightUnit)
   const restTimerDefault = useWorkoutStore((state) => state.restTimerDefault)
   const restTimerVibration = useWorkoutStore((state) => state.restTimerVibration)
+  const scheduleExerciseForDay = useWorkoutStore((state) => state.scheduleExerciseForDay)
+  const getScheduledExercisesForDay = useWorkoutStore((state) => state.getScheduledExercisesForDay)
+  const clearScheduledExercisesForDay = useWorkoutStore((state) => state.clearScheduledExercisesForDay)
 
   const currentPhase = useMemo(
     () => programState.phases.find((phase) => phase.id === currentPhaseId),
@@ -63,6 +67,13 @@ function WorkoutPage() {
   const [swapExerciseIndex, setSwapExerciseIndex] = useState(null)
   const activeCustomTemplate = useWorkoutStore((state) => state.activeCustomTemplate)
   const clearCustomWorkoutTemplate = useWorkoutStore((state) => state.clearCustomWorkoutTemplate)
+  const [showProgramDayPicker, setShowProgramDayPicker] = useState(false)
+  const [pickerWeekNumber, setPickerWeekNumber] = useState(String(currentWeek))
+  const [pickerDayIndex, setPickerDayIndex] = useState(String(programDay?.dayIndex ?? 0))
+  const [exerciseToSchedule, setExerciseToSchedule] = useState(null)
+  const [scheduleWeekNumber, setScheduleWeekNumber] = useState(String(currentWeek))
+  const [scheduleDayIndex, setScheduleDayIndex] = useState(String(programDay?.dayIndex ?? 0))
+  const [sessionNotice, setSessionNotice] = useState('')
   const [showCustomRest, setShowCustomRest] = useState(false)
   const [showPlateCalculator, setShowPlateCalculator] = useState(false)
   const [showCompletionModal, setShowCompletionModal] = useState(false)
@@ -137,6 +148,60 @@ function WorkoutPage() {
     return suggestions
   }, [activeExercises, completedDays])
 
+  const currentPhaseWeeks = useMemo(() => currentPhase?.weeks || [], [currentPhase])
+
+  const pickerWeekData = useMemo(() => {
+    const parsed = Number(pickerWeekNumber)
+    if (!Number.isFinite(parsed)) return null
+    return currentPhaseWeeks.find((week) => week.weekNumber === parsed) || null
+  }, [currentPhaseWeeks, pickerWeekNumber])
+
+  const pickerDayOptions = useMemo(() => {
+    return (pickerWeekData?.days || []).filter((day) => !day.isRest)
+  }, [pickerWeekData])
+
+  const scheduleWeekData = useMemo(() => {
+    const parsed = Number(scheduleWeekNumber)
+    if (!Number.isFinite(parsed)) return null
+    return currentPhaseWeeks.find((week) => week.weekNumber === parsed) || null
+  }, [currentPhaseWeeks, scheduleWeekNumber])
+
+  const scheduleDayOptions = useMemo(() => {
+    return (scheduleWeekData?.days || []).filter((day) => !day.isRest)
+  }, [scheduleWeekData])
+
+  const scheduledForCurrentDay = useMemo(() => {
+    if (!programDay || activeCustomTemplate) return []
+    return getScheduledExercisesForDay(currentPhaseId, currentWeek, programDay.dayIndex)
+  }, [activeCustomTemplate, currentPhaseId, currentWeek, getScheduledExercisesForDay, programDay])
+
+  useEffect(() => {
+    setPickerWeekNumber(String(currentWeek))
+    setScheduleWeekNumber(String(currentWeek))
+  }, [currentWeek])
+
+  useEffect(() => {
+    if (!programDay) return
+    setPickerDayIndex(String(programDay.dayIndex))
+    setScheduleDayIndex(String(programDay.dayIndex))
+  }, [programDay])
+
+  useEffect(() => {
+    if (!pickerDayOptions.length) return
+    const hasSelected = pickerDayOptions.some((day) => String(day.dayIndex) === String(pickerDayIndex))
+    if (!hasSelected) {
+      setPickerDayIndex(String(pickerDayOptions[0].dayIndex))
+    }
+  }, [pickerDayIndex, pickerDayOptions])
+
+  useEffect(() => {
+    if (!scheduleDayOptions.length) return
+    const hasSelected = scheduleDayOptions.some((day) => String(day.dayIndex) === String(scheduleDayIndex))
+    if (!hasSelected) {
+      setScheduleDayIndex(String(scheduleDayOptions[0].dayIndex))
+    }
+  }, [scheduleDayIndex, scheduleDayOptions])
+
   // Initialize from Custom Template OR program day OR restored auto-save
   useEffect(() => {
     // 1. Custom Template Override
@@ -204,12 +269,13 @@ function WorkoutPage() {
         setStartTime(Date.now())
       }
     } else if (programDay?.exercises && !activeCustomTemplate) {
-      setActiveExercises([...programDay.exercises])
-      setExerciseLog(buildInitialLog(programDay.exercises))
+      const merged = [...programDay.exercises, ...scheduledForCurrentDay]
+      setActiveExercises(merged)
+      setExerciseLog(buildInitialLog(merged))
       setSessionNotes('')
       setStartTime(Date.now())
     }
-  }, [currentPhaseId, currentWeek, programDay?.dayIndex, activeCustomTemplate, todaysWorkout, programDay])
+  }, [currentPhaseId, currentWeek, programDay?.dayIndex, activeCustomTemplate, todaysWorkout, programDay, scheduledForCurrentDay])
 
   // Auto-prefill blank weight inputs from previous session values.
   useEffect(() => {
@@ -427,6 +493,96 @@ function WorkoutPage() {
     setShowAddModal(false)
   }, [])
 
+  const applyProgramDayTemplate = useCallback(() => {
+    const targetWeek = Number(pickerWeekNumber)
+    const targetDayIndex = Number(pickerDayIndex)
+    if (!currentPhase || !Number.isFinite(targetWeek) || !Number.isFinite(targetDayIndex)) return
+
+    const weekData = currentPhase.weeks.find((week) => week.weekNumber === targetWeek)
+    const dayData = weekData?.days?.find((day) => day.dayIndex === targetDayIndex)
+    if (!dayData || dayData.isRest) return
+
+    const template = {
+      id: `program_${currentPhaseId}_w${targetWeek}_d${targetDayIndex}`,
+      name: dayData.label,
+      templateSource: 'program',
+      templateWeek: targetWeek,
+      exercises: JSON.parse(JSON.stringify(dayData.exercises || [])),
+    }
+
+    localStorage.removeItem(AUTOSAVE_KEY)
+    setActiveExercises([])
+    setExerciseLog({})
+    setSessionNotes('')
+    setDismissedSuggestionIds([])
+    setShowProgramDayPicker(false)
+    setSessionNotice(`Using ${dayData.label} from Week ${targetWeek} for this session.`)
+    loadCustomWorkoutTemplate(template)
+  }, [currentPhase, currentPhaseId, loadCustomWorkoutTemplate, pickerDayIndex, pickerWeekNumber])
+
+  const openScheduleExerciseModal = useCallback((exercise) => {
+    if (!exercise || !currentPhase || !programDay) return
+
+    const allDays = []
+    currentPhase.weeks.forEach((week) => {
+      week.days.forEach((day) => {
+        if (day.isRest) return
+        allDays.push({
+          weekNumber: week.weekNumber,
+          dayIndex: day.dayIndex,
+          label: day.label,
+          type: day.type,
+        })
+      })
+    })
+
+    const recommended = allDays.find((day) => {
+      if (day.weekNumber < currentWeek) return false
+      if (day.weekNumber === currentWeek && day.dayIndex <= programDay.dayIndex) return false
+      return day.type === programDay.type
+    }) || allDays.find((day) => !(day.weekNumber === currentWeek && day.dayIndex === programDay.dayIndex))
+
+    if (recommended) {
+      setScheduleWeekNumber(String(recommended.weekNumber))
+      setScheduleDayIndex(String(recommended.dayIndex))
+    }
+
+    setExerciseToSchedule(exercise)
+  }, [currentPhase, currentWeek, programDay])
+
+  const confirmScheduleExercise = useCallback(() => {
+    if (!exerciseToSchedule || !currentPhase) return
+
+    const targetWeek = Number(scheduleWeekNumber)
+    const targetDay = Number(scheduleDayIndex)
+    if (!Number.isFinite(targetWeek) || !Number.isFinite(targetDay)) return
+
+    const weekData = currentPhase.weeks.find((week) => week.weekNumber === targetWeek)
+    const dayData = weekData?.days?.find((day) => day.dayIndex === targetDay)
+    if (!dayData || dayData.isRest) return
+
+    if (targetWeek === currentWeek && targetDay === programDay?.dayIndex) {
+      setSessionNotice('Choose a different day to move this exercise.')
+      return
+    }
+
+    scheduleExerciseForDay({
+      exercise: exerciseToSchedule,
+      sourcePhaseId: currentPhaseId,
+      sourceWeek: currentWeek,
+      sourceDayIndex: programDay?.dayIndex,
+      sourceLabel: programDay?.label,
+      targetPhaseId: currentPhaseId,
+      targetWeek,
+      targetDayIndex: targetDay,
+      targetLabel: dayData.label,
+    })
+
+    removeExercise(exerciseToSchedule.id)
+    setSessionNotice(`${exerciseToSchedule.name} moved to Week ${targetWeek} - ${dayData.label}.`)
+    setExerciseToSchedule(null)
+  }, [currentPhase, currentPhaseId, currentWeek, exerciseToSchedule, programDay, removeExercise, scheduleDayIndex, scheduleExerciseForDay, scheduleWeekNumber])
+
   // ── Move exercise up/down ──
   const moveExercise = useCallback((index, direction) => {
     setActiveExercises((prev) => {
@@ -449,12 +605,14 @@ function WorkoutPage() {
     const durationMinutes = Math.max(1, Math.round(elapsedSeconds / 60))
 
     const payload = activeExercises.map((exercise) => ({
-      exerciseId: exercise.id,
+      exerciseId: exercise.originalExerciseId || exercise.id,
       name: exercise.name,
       muscleGroup: exercise.muscleGroup || '',
       sets: exerciseLog[exercise.id]?.sets || [],
       notes: exerciseLog[exercise.id]?.notes || '',
     }))
+
+    const workoutLabelOverride = activeCustomTemplate?.name || undefined
 
     try {
       if (!activeCustomTemplate && todaysWorkout) {
@@ -462,13 +620,20 @@ function WorkoutPage() {
           sessionNotes,
           durationMinutes,
           prExercises,
+          workoutLabel: workoutLabelOverride,
         })
       } else {
         await completeWorkout(payload, {
           sessionNotes,
           durationMinutes,
           prExercises,
+          workoutLabel: workoutLabelOverride,
+          clearScheduledForCurrentDay: !activeCustomTemplate,
         })
+      }
+
+      if (!activeCustomTemplate && todaysWorkout && programDay) {
+        clearScheduledExercisesForDay(currentPhaseId, currentWeek, programDay.dayIndex)
       }
 
       const stateAfterSave = useWorkoutStore.getState()
@@ -488,8 +653,11 @@ function WorkoutPage() {
   }, [
     activeCustomTemplate,
     activeExercises,
+    clearScheduledExercisesForDay,
     clearCustomWorkoutTemplate,
     completeWorkout,
+    currentPhaseId,
+    currentWeek,
     elapsedSeconds,
     exerciseLog,
     isSavingWorkout,
@@ -517,10 +685,11 @@ function WorkoutPage() {
 
   // ── Cancel/Discard Workout ──
   const onCancelCustom = () => {
-    if (window.confirm('Discard this custom workout session?')) {
+    if (window.confirm('Discard this workout override/session?')) {
       localStorage.removeItem(AUTOSAVE_KEY)
+      const wasProgramTemplate = activeCustomTemplate?.templateSource === 'program'
       clearCustomWorkoutTemplate()
-      navigate('/program')
+      navigate(wasProgramTemplate ? '/workout' : '/program')
     }
   }
 
@@ -574,6 +743,23 @@ function WorkoutPage() {
     })
   }, [activeExercises])
 
+  const programInstructionById = useMemo(() => {
+    const map = {}
+    ;(programState?.phases || []).forEach((phase) => {
+      ;(phase.weeks || []).forEach((week) => {
+        ;(week.days || []).forEach((day) => {
+          ;(day.exercises || []).forEach((exercise) => {
+            if (!exercise?.id) return
+            if (!map[exercise.id]) {
+              map[exercise.id] = exercise.notes || ''
+            }
+          })
+        })
+      })
+    })
+    return map
+  }, [programState])
+
   const activeIds = useMemo(() => new Set(activeExercises.map(e => e.id)), [activeExercises])
 
   const dismissProgressionSuggestion = useCallback((exerciseId) => {
@@ -599,25 +785,36 @@ function WorkoutPage() {
       {activeCustomTemplate ? (
         <section className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600 mb-1">Custom Workout Active</p>
-            <h2 className="text-xl font-bold text-zinc-900 flex items-center gap-3">
-              {activeCustomTemplate.name}
-              <span className="text-sm font-medium text-zinc-500 font-mono bg-white px-2 py-0.5 rounded-md border border-zinc-200">{formatTime(elapsedSeconds)}</span>
-            </h2>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600 mb-1">
+              {activeCustomTemplate?.templateSource === 'program' ? 'Program Day Override Active' : 'Custom Workout Active'}
+            </p>
+            <h2 className="text-xl font-bold text-zinc-900">{activeCustomTemplate.name}</h2>
+            {activeCustomTemplate?.templateSource === 'program' && (
+              <p className="mt-1 text-xs text-zinc-600">Week {activeCustomTemplate.templateWeek}</p>
+            )}
           </div>
           <button onClick={onCancelCustom} className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition shadow-sm">
-            Discard
+            {activeCustomTemplate?.templateSource === 'program' ? 'Use Default Day' : 'Discard'}
           </button>
         </section>
       ) : (
-        <div className="flex items-center justify-between">
-           <PhaseIndicator phaseName={currentPhase?.name} week={currentWeek} day={programDay} />
-           {!programDay?.isRest && (
-           <div className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm font-semibold text-zinc-700 shadow-sm flex items-center gap-2 font-mono">
-             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-             {formatTime(elapsedSeconds)}
-           </div>
-           )}
+        <div className="flex items-center justify-between gap-2">
+          <PhaseIndicator phaseName={currentPhase?.name} week={currentWeek} day={programDay} />
+          {!programDay?.isRest && (
+            <button
+              type="button"
+              onClick={() => setShowProgramDayPicker(true)}
+              className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+            >
+              Use Another Day
+            </button>
+          )}
+        </div>
+      )}
+
+      {sessionNotice && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          {sessionNotice}
         </div>
       )}
 
@@ -687,6 +884,7 @@ function WorkoutPage() {
             <ExerciseCard
               key={exercise.id}
               exercise={exercise}
+              instructionNote={programInstructionById[exercise.id] || exercise.notes || ''}
               exIndex={exIndex}
               exerciseLog={exerciseLog}
               previousWeights={previousWeights}
@@ -699,6 +897,7 @@ function WorkoutPage() {
               onDismissSuggestion={() => dismissProgressionSuggestion(exercise.id)}
               superset={supersetMeta[exIndex]}
               setSwapExerciseIndex={setSwapExerciseIndex}
+              onScheduleExercise={openScheduleExerciseModal}
               moveExercise={moveExercise}
               activeExercisesLength={activeExercises.length}
               removeExercise={removeExercise}
@@ -751,6 +950,124 @@ function WorkoutPage() {
             </div>
           </div>
         </>
+      )}
+
+      {showProgramDayPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold text-zinc-900">Choose Workout Day</h3>
+            <p className="mt-1 text-xs text-zinc-500">Use another day template for this session without changing your saved progression order.</p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-xs font-medium text-zinc-600">
+                Week
+                <select
+                  value={pickerWeekNumber}
+                  onChange={(event) => setPickerWeekNumber(event.target.value)}
+                  className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
+                >
+                  {currentPhaseWeeks.map((week) => (
+                    <option key={week.weekNumber} value={String(week.weekNumber)}>
+                      Week {week.weekNumber}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-1 text-xs font-medium text-zinc-600">
+                Day
+                <select
+                  value={pickerDayIndex}
+                  onChange={(event) => setPickerDayIndex(event.target.value)}
+                  className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
+                >
+                  {pickerDayOptions.map((day) => (
+                    <option key={day.dayIndex} value={String(day.dayIndex)}>
+                      {day.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowProgramDayPicker(false)}
+                className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyProgramDayTemplate}
+                className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+              >
+                Use This Day
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {exerciseToSchedule && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold text-zinc-900">Move Exercise To Another Day</h3>
+            <p className="mt-1 text-xs text-zinc-500">
+              {exerciseToSchedule.name} will be removed from today and added to your selected future day.
+            </p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-xs font-medium text-zinc-600">
+                Target Week
+                <select
+                  value={scheduleWeekNumber}
+                  onChange={(event) => setScheduleWeekNumber(event.target.value)}
+                  className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
+                >
+                  {currentPhaseWeeks.map((week) => (
+                    <option key={week.weekNumber} value={String(week.weekNumber)}>
+                      Week {week.weekNumber}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-1 text-xs font-medium text-zinc-600">
+                Target Day
+                <select
+                  value={scheduleDayIndex}
+                  onChange={(event) => setScheduleDayIndex(event.target.value)}
+                  className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-500"
+                >
+                  {scheduleDayOptions.map((day) => (
+                    <option key={day.dayIndex} value={String(day.dayIndex)}>
+                      {day.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setExerciseToSchedule(null)}
+                className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmScheduleExercise}
+                className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+              >
+                Move Exercise
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Add Exercise Modal */}

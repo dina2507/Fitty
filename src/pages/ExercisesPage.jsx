@@ -20,7 +20,7 @@ function saveOverrides(overrides) {
   localStorage.setItem(MG_OVERRIDES_KEY, JSON.stringify(overrides))
 }
 
-// Extract all Jeff Nippard exercises (deduplicated by name) with override support
+// Extract all Dina Workout plan exercises (deduplicated by name) with override support
 function getJeffExercises(overrides) {
   const map = new Map()
   program.phases.forEach(phase => {
@@ -194,6 +194,7 @@ function ExerciseFormModal({ exercise, onSave, onClose }) {
 function ExercisesPage() {
   const { user } = useAuth()
   const completedDays = useWorkoutStore((state) => state.completedDays)
+  const planDisplayName = useWorkoutStore((state) => state.planDisplayName)
   const [activeTab, setActiveTab] = useState('program')
   const [searchQuery, setSearchQuery] = useState('')
   const [muscleFilter, setMuscleFilter] = useState('All')
@@ -355,7 +356,7 @@ function ExercisesPage() {
       {/* Tabs */}
       <div className="flex gap-1 rounded-xl bg-zinc-200 p-1">
         <button onClick={() => setActiveTab('program')} className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'program' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-600 hover:text-zinc-900'}`}>
-          Jeff Nippard ({jeffExercises.length})
+          {planDisplayName} ({jeffExercises.length})
         </button>
         <button onClick={() => setActiveTab('custom')} className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'custom' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-600 hover:text-zinc-900'}`}>
           My Exercises ({customExercises.length})
@@ -382,7 +383,7 @@ function ExercisesPage() {
         )}
       </div>
 
-      {/* Jeff Nippard — Grouped View */}
+      {/* Plan — Grouped View */}
       {activeTab === 'program' && viewMode === 'grouped' && (
         <div className="grid gap-3">
           {groupedJeff.map(({ group, exercises }) => {
@@ -450,7 +451,7 @@ function ExercisesPage() {
         </div>
       )}
 
-      {/* Jeff Nippard — Flat List View */}
+      {/* Plan — Flat List View */}
       {activeTab === 'program' && viewMode === 'list' && (
         <div className="grid gap-2">
           <p className="text-xs text-zinc-500">{filteredJeff.length} exercises</p>

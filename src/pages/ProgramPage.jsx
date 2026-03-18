@@ -12,6 +12,7 @@ function ProgramPage() {
   const [loading, setLoading] = useState(false)
   
   const loadCustomWorkoutTemplate = useWorkoutStore(state => state.loadCustomWorkoutTemplate)
+  const planDisplayName = useWorkoutStore(state => state.planDisplayName)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -59,7 +60,7 @@ function ProgramPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900">Programs & Workouts</h1>
-          <p className="mt-1 text-sm text-zinc-500">View official programs and your custom templates</p>
+          <p className="mt-1 text-sm text-zinc-500">View {planDisplayName} and your custom templates</p>
         </div>
       </div>
 
@@ -69,7 +70,7 @@ function ProgramPage() {
           onClick={() => setActiveTab('jeff')} 
           className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${activeTab === 'jeff' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-600 hover:text-zinc-900'}`}
         >
-          Jeff Nippard PPL
+          {planDisplayName}
         </button>
         <button 
           onClick={() => setActiveTab('custom')} 
@@ -79,7 +80,7 @@ function ProgramPage() {
         </button>
       </div>
 
-      {/* Jeff Nippard Program View (Read Only) */}
+      {/* Program View (Read Only) */}
       {activeTab === 'jeff' && (
         <div className="grid gap-6">
           {program.phases.map(phase => (

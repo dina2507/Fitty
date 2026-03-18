@@ -92,9 +92,11 @@ export const useWorkoutStore = create((set, get) => ({
   programStart: null,
   completedDays: [],
   bodyweightLogs: [],
+  planDisplayName: 'Dina Workout plan',
   weightUnit: 'kg',
   restTimerDefault: 120,
   restTimerVibration: true,
+  scheduledExercises: [],
   dismissedAlerts: [],
   programCustomizations: {}, // Map of { [originalExerciseId]: overriddenExerciseObject }
   isSaved: true,
@@ -113,7 +115,9 @@ export const useWorkoutStore = create((set, get) => ({
     const savedProgress = storage.getProgress()
     const savedCompletedDays = storage.getCompletedDays()
     const savedBodyweight = storage.getBodyweightLogs()
+    const savedPlanDisplayName = storage.getPlanDisplayName()
     const savedCustomizations = storage.getProgramCustomizations()
+    const savedScheduledExercises = storage.getScheduledExercises()
     const savedWeightUnit = storage.getWeightUnit()
     const savedRestTimerDefault = storage.getRestTimerDefault()
     const savedRestTimerVibration = storage.getRestTimerVibration()
@@ -145,9 +149,17 @@ export const useWorkoutStore = create((set, get) => ({
     if (savedBodyweight) {
       set({ bodyweightLogs: savedBodyweight })
     }
+
+    if (savedPlanDisplayName) {
+      set({ planDisplayName: savedPlanDisplayName })
+    }
     
     if (savedCustomizations) {
       set({ programCustomizations: savedCustomizations })
+    }
+
+    if (savedScheduledExercises) {
+      set({ scheduledExercises: savedScheduledExercises })
     }
 
     set({
@@ -230,6 +242,86 @@ export const useWorkoutStore = create((set, get) => ({
       })
       set({ syncStatus: res.offline ? 'offline' : (res.error ? 'error' : 'saved') })
     }
+  },
+
+  setPlanDisplayName: (name) => {
+    const normalized = String(name || '').trim() || 'Dina Workout plan'
+    storage.savePlanDisplayName(normalized)
+    set({ planDisplayName: normalized })
+  },
+
+  scheduleExerciseForDay: (payload) => {
+    const exercise = payload?.exercise
+    const targetPhaseId = payload?.targetPhaseId
+    const targetWeek = Number(payload?.targetWeek)
+    const targetDayIndex = Number(payload?.targetDayIndex)
+
+    if (!exercise || !targetPhaseId || !Number.isFinite(targetWeek) || !Number.isFinite(targetDayIndex)) {
+      return false
+    }
+
+    const queueItem = {
+      id: `sched_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: new Date().toISOString(),
+      sourcePhaseId: payload?.sourcePhaseId || null,
+      sourceWeek: Number.isFinite(Number(payload?.sourceWeek)) ? Number(payload.sourceWeek) : null,
+      sourceDayIndex: Number.isFinite(Number(payload?.sourceDayIndex)) ? Number(payload.sourceDayIndex) : null,
+      sourceLabel: payload?.sourceLabel || null,
+      targetPhaseId,
+      targetWeek,
+      targetDayIndex,
+      targetLabel: payload?.targetLabel || null,
+      exercise: {
+        ...exercise,
+        isSuperset: false,
+        supersetGroup: null,
+      },
+    }
+
+    const next = [...get().scheduledExercises, queueItem]
+    storage.saveScheduledExercises(next)
+    set({ scheduledExercises: next })
+    return true
+  },
+
+  getScheduledExercisesForDay: (phaseId, week, dayIndex) => {
+    const targetWeek = Number(week)
+    const targetDay = Number(dayIndex)
+    if (!phaseId || !Number.isFinite(targetWeek) || !Number.isFinite(targetDay)) return []
+
+    return get().scheduledExercises
+      .filter((item) => (
+        item.targetPhaseId === phaseId
+        && Number(item.targetWeek) === targetWeek
+        && Number(item.targetDayIndex) === targetDay
+      ))
+      .map((item) => ({
+        ...item.exercise,
+        id: `${item.exercise?.id || 'exercise'}__scheduled__${item.id}`,
+        originalExerciseId: item.exercise?.id || null,
+        scheduledTransferId: item.id,
+        scheduledFromLabel: item.sourceLabel || '',
+      }))
+  },
+
+  clearScheduledExercisesForDay: (phaseId, week, dayIndex) => {
+    const targetWeek = Number(week)
+    const targetDay = Number(dayIndex)
+    if (!phaseId || !Number.isFinite(targetWeek) || !Number.isFinite(targetDay)) return 0
+
+    const existing = get().scheduledExercises
+    const next = existing.filter((item) => !(
+      item.targetPhaseId === phaseId
+      && Number(item.targetWeek) === targetWeek
+      && Number(item.targetDayIndex) === targetDay
+    ))
+
+    const removed = existing.length - next.length
+    if (removed > 0) {
+      storage.saveScheduledExercises(next)
+      set({ scheduledExercises: next })
+    }
+    return removed
   },
 
   setWeightUnit: async (unit) => {
@@ -409,9 +501,12 @@ export const useWorkoutStore = create((set, get) => ({
       ? metadata.durationMinutes
       : (completedDays[existingIndex].durationMinutes || completedDays[existingIndex].duration_minutes || null)
     const sessionNotes = metadata.sessionNotes ?? completedDays[existingIndex].sessionNotes ?? completedDays[existingIndex].session_notes ?? ''
+    const workoutLabel = metadata.workoutLabel || completedDays[existingIndex].label || completedDays[existingIndex].workout_name || 'Workout'
 
     const updatedDay = {
       ...completedDays[existingIndex],
+      label: workoutLabel,
+      workout_name: workoutLabel,
       exercises: workoutData,
       sessionNotes,
       session_notes: sessionNotes,
@@ -445,6 +540,7 @@ export const useWorkoutStore = create((set, get) => ({
       const { error } = await supabase
         .from('workout_logs')
         .update({
+          workout_name: logPayload.workout_name,
           exercises: logPayload.exercises,
           notes: logPayload.notes,
           duration_minutes: logPayload.duration_minutes,
@@ -470,12 +566,15 @@ export const useWorkoutStore = create((set, get) => ({
     }
 
     // Save workout to completed days
+    const workoutLabel = metadata.workoutLabel || currentDay.label
+
     const completedDay = {
       date: new Date().toISOString(),
       phaseId: currentPhaseId,
       week: currentWeek,
       dayIndex: currentDayIndex,
-      label: currentDay.label,
+      label: workoutLabel,
+      workout_name: workoutLabel,
       exercises: workoutData,
       sessionNotes: metadata.sessionNotes || '',
       session_notes: metadata.sessionNotes || '',
@@ -533,7 +632,6 @@ export const useWorkoutStore = create((set, get) => ({
         }
       }
 
-      // Sync progress
       const state = get()
       const res = await syncProgressToSupabase(session.user.id, newProgress, state.programStart, {
         weightUnit: state.weightUnit,
@@ -541,6 +639,10 @@ export const useWorkoutStore = create((set, get) => ({
         dismissedAlerts: state.dismissedAlerts,
       })
       set({ syncStatus: res.offline ? 'offline' : (res.error ? 'error' : 'saved') })
+    }
+
+    if (metadata.clearScheduledForCurrentDay !== false) {
+      get().clearScheduledExercisesForDay(currentPhaseId, currentWeek, currentDayIndex)
     }
   },
 
@@ -697,9 +799,11 @@ export const useWorkoutStore = create((set, get) => ({
       programStart: null,
       completedDays: [],
       activeCustomTemplate: null,
+      planDisplayName: 'Dina Workout plan',
       weightUnit: 'kg',
       restTimerDefault: 120,
       restTimerVibration: true,
+      scheduledExercises: [],
       dismissedAlerts: [],
       milestoneToastQueue: [],
       syncStatus: 'saved',
