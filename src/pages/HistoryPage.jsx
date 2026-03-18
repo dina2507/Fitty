@@ -37,12 +37,6 @@ function addMonths(date, amount) {
   return new Date(date.getFullYear(), date.getMonth() + amount, 1)
 }
 
-function formatDateOnly(value) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toISOString().split('T')[0]
-}
-
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value))
 }
@@ -61,6 +55,49 @@ function getTypeLabel(item) {
 
 function getUniqueMuscleGroups(exercises = []) {
   return [...new Set(exercises.map((exercise) => exercise.muscleGroup).filter(Boolean))]
+}
+
+function buildWorkoutDeleteMatch(log, userId) {
+  if (!userId) return null
+
+  const dateOnly = toWorkoutDateOnly(log?.date)
+  if (!dateOnly) return null
+
+  const match = {
+    user_id: userId,
+    date: dateOnly,
+  }
+
+  const phaseId = log?.phaseId || log?.phase_id || null
+  if (phaseId) {
+    match.phase_id = phaseId
+  }
+
+  const weekNumber = Number(log?.week ?? log?.week_number)
+  if (Number.isFinite(weekNumber)) {
+    match.week_number = weekNumber
+  }
+
+  const dayIndex = Number(log?.dayIndex ?? log?.day_index)
+  if (Number.isFinite(dayIndex)) {
+    match.day_index = dayIndex
+  }
+
+  return match
+}
+
+function queueWorkoutDelete(log, userId, nowIso) {
+  const deletePayload = { deleted_at: nowIso, updated_at: nowIso }
+  const legacyMatch = buildWorkoutDeleteMatch(log, userId)
+
+  if (legacyMatch) {
+    enqueueMutation('workout_logs', 'update', deletePayload, legacyMatch)
+    return
+  }
+
+  if (log?.id && userId) {
+    enqueueMutation('workout_logs', 'update', deletePayload, { user_id: userId, id: log.id })
+  }
 }
 
 function findExerciseSessionMax(exercise) {
@@ -342,50 +379,44 @@ function HistoryPage() {
     try {
       if (user?.id) {
         const nowIso = new Date().toISOString()
+        const deletePayload = { deleted_at: nowIso, updated_at: nowIso }
 
         if (!navigator.onLine) {
-          if (item.id) {
-            const payload = buildHistoryLogPayload(item, user.id, nowIso, { deletedAt: nowIso })
-            enqueueMutation('workout_logs', 'upsert', payload)
-          } else {
-            const fallbackDateOnly = formatDateOnly(item.date)
-            const fallbackMatch = {
-              user_id: user.id,
-              date: fallbackDateOnly,
-              phase_id: item.phaseId,
-              week_number: item.week,
-              day_index: item.dayIndex,
-            }
-            enqueueMutation('workout_logs', 'update', { deleted_at: nowIso, updated_at: nowIso }, fallbackMatch)
-          }
+          queueWorkoutDelete(item, user.id, nowIso)
         } else {
+          let deletedRemote = false
+
           if (item.id) {
-            const payload = buildHistoryLogPayload(item, user.id, nowIso, { deletedAt: nowIso })
-            const { error } = await supabase
+            const { data, error } = await supabase
               .from('workout_logs')
-              .upsert(payload, { onConflict: 'id' })
+              .update(deletePayload)
+              .match({ user_id: user.id, id: item.id })
+              .select('id')
 
-            if (error) {
-              enqueueMutation('workout_logs', 'upsert', payload)
+            if (!error && Array.isArray(data) && data.length > 0) {
+              deletedRemote = true
             }
-          } else {
-            const fallbackDateOnly = formatDateOnly(item.date)
-            const fallbackMatch = {
-              user_id: user.id,
-              date: fallbackDateOnly,
-              phase_id: item.phaseId,
-              week_number: item.week,
-              day_index: item.dayIndex,
-            }
+          }
 
-            const { error } = await supabase
-              .from('workout_logs')
-              .update({ deleted_at: nowIso, updated_at: nowIso })
-              .match(fallbackMatch)
+          if (!deletedRemote) {
+            const fallbackMatch = buildWorkoutDeleteMatch(item, user.id)
 
-            if (error) {
-              enqueueMutation('workout_logs', 'update', { deleted_at: nowIso, updated_at: nowIso }, fallbackMatch)
+            if (fallbackMatch) {
+              const { data, error } = await supabase
+                .from('workout_logs')
+                .update(deletePayload)
+                .match(fallbackMatch)
+                .is('deleted_at', null)
+                .select('id')
+
+              if (!error && Array.isArray(data) && data.length > 0) {
+                deletedRemote = true
+              }
             }
+          }
+
+          if (!deletedRemote) {
+            queueWorkoutDelete(item, user.id, nowIso)
           }
         }
       }

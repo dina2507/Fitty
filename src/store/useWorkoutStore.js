@@ -804,13 +804,15 @@ export const useWorkoutStore = create((set, get) => ({
           : localCompletedDays
 
         if (!hasPendingWorkoutDeleteAll) {
-          const mergedWorkouts = mergeCompletedDays(localWorkoutBaseline, remoteWorkouts, {
-            preferLocal: hasPendingWorkoutWrites,
-          })
+          const nextCompletedDays = hasPendingWorkoutWrites
+            ? mergeCompletedDays(localWorkoutBaseline, remoteWorkouts, { preferLocal: true }).items
+            : (Array.isArray(remoteWorkouts)
+              ? remoteWorkouts.filter((day) => !day?.deletedAt)
+              : [])
 
-          if (mergedWorkouts.changed) {
-            storage.saveCompletedDays(mergedWorkouts.items)
-            statePatch.completedDays = mergedWorkouts.items
+          if (JSON.stringify(nextCompletedDays) !== JSON.stringify(localCompletedDays)) {
+            storage.saveCompletedDays(nextCompletedDays)
+            statePatch.completedDays = nextCompletedDays
           }
         }
       }
