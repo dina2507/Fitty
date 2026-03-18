@@ -18,8 +18,13 @@ import { flushSyncQueue, getSyncQueue } from './utils/syncQueue'
 
 function useSyncQueueListener() {
   useEffect(() => {
-    const applySyncStatus = (cleared) => {
+    const applySyncStatus = (cleared, remoteOk = true) => {
       const pending = getSyncQueue().length
+
+      if (!remoteOk && navigator.onLine) {
+        useWorkoutStore.setState({ syncStatus: 'error' })
+        return
+      }
 
       if (cleared && pending === 0) {
         useWorkoutStore.setState({ syncStatus: 'saved' })
@@ -35,7 +40,14 @@ function useSyncQueueListener() {
 
     const flushAndUpdate = async () => {
       const cleared = await flushSyncQueue()
-      applySyncStatus(cleared)
+
+      let remoteOk = true
+      if (cleared && navigator.onLine) {
+        const cloud = await useWorkoutStore.getState().syncFromCloud({ setSyncing: false })
+        remoteOk = Boolean(cloud?.ok || cloud?.offline)
+      }
+
+      applySyncStatus(cleared, remoteOk)
     }
 
     // Attempt flush on mount if online
@@ -48,18 +60,33 @@ function useSyncQueueListener() {
       flushAndUpdate()
     }
 
+    const handleFocus = () => {
+      if (navigator.onLine) {
+        flushAndUpdate()
+      }
+    }
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
         flushAndUpdate()
       }
     }
 
+    const pollId = window.setInterval(() => {
+      if (navigator.onLine) {
+        flushAndUpdate()
+      }
+    }, 45000)
+
     window.addEventListener('online', handleOnline)
+    window.addEventListener('focus', handleFocus)
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       window.removeEventListener('online', handleOnline)
+      window.removeEventListener('focus', handleFocus)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.clearInterval(pollId)
     }
   }, [])
 }

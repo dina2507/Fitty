@@ -7,6 +7,7 @@ import defaultProgram from '../data/program.json'
 
 const BUILT_IN_PROGRAM_ID = 'built_in_default_program'
 const LEGACY_PROGRESS_OPTIONAL_FIELDS = ['weight_unit', 'rest_timer_default', 'dismissed_alerts']
+let cloudSyncPromise = null
 
 function isUserProgressColumnMismatch(error) {
   const message = String(error?.message || '')
@@ -20,6 +21,89 @@ function stripLegacyProgressFields(payload) {
     delete sanitized[field]
   })
   return sanitized
+}
+
+function normalizeRemoteDate(value) {
+  if (!value) return new Date().toISOString()
+
+  const raw = String(value)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return `${raw}T00:00:00.000Z`
+  }
+
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) {
+    return new Date().toISOString()
+  }
+
+  return parsed.toISOString()
+}
+
+function normalizeRemoteWorkoutLog(row) {
+  const weekRaw = row?.week_number ?? row?.week
+  const dayIndexRaw = row?.day_index ?? row?.dayIndex
+  const durationRaw = row?.duration_minutes ?? row?.durationMinutes
+  const notes = row?.notes ?? row?.session_notes ?? ''
+  const label = row?.workout_name || row?.day_label || row?.label || 'Workout'
+  const prs = Array.isArray(row?.pr_exercises)
+    ? row.pr_exercises
+    : (Array.isArray(row?.prExercises) ? row.prExercises : [])
+
+  return {
+    id: row?.id || undefined,
+    date: normalizeRemoteDate(row?.date),
+    phaseId: row?.phase_id || row?.phaseId || '',
+    week: Number.isFinite(Number(weekRaw)) ? Number(weekRaw) : 1,
+    dayIndex: Number.isFinite(Number(dayIndexRaw)) ? Number(dayIndexRaw) : 0,
+    label,
+    workout_name: label,
+    exercises: Array.isArray(row?.exercises) ? row.exercises : [],
+    sessionNotes: notes,
+    session_notes: notes,
+    durationMinutes: Number.isFinite(Number(durationRaw)) ? Number(durationRaw) : null,
+    duration_minutes: Number.isFinite(Number(durationRaw)) ? Number(durationRaw) : null,
+    prExercises: prs,
+    pr_exercises: prs,
+  }
+}
+
+function getCompletedDayKey(day) {
+  if (day?.id) return `id:${day.id}`
+
+  return [
+    'fallback',
+    String(day?.date || ''),
+    String(day?.phaseId || day?.phase_id || ''),
+    String(day?.week ?? day?.week_number ?? ''),
+    String(day?.dayIndex ?? day?.day_index ?? ''),
+    String(day?.label || day?.workout_name || ''),
+  ].join('|')
+}
+
+function mergeCompletedDays(localDays = [], remoteDays = []) {
+  const local = Array.isArray(localDays) ? localDays : []
+  const remote = Array.isArray(remoteDays) ? remoteDays : []
+
+  const mergedByKey = new Map()
+
+  remote.forEach((day) => {
+    mergedByKey.set(getCompletedDayKey(day), day)
+  })
+
+  local.forEach((day) => {
+    const key = getCompletedDayKey(day)
+    if (!mergedByKey.has(key)) {
+      mergedByKey.set(key, day)
+    }
+  })
+
+  const merged = [...mergedByKey.values()]
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  return {
+    items: merged,
+    changed: JSON.stringify(merged) !== JSON.stringify(local),
+  }
 }
 
 function getProgramSignature(programData) {
@@ -194,6 +278,65 @@ async function fetchProgressFromSupabase(userId) {
   }
 }
 
+async function fetchWorkoutLogsFromSupabase(userId) {
+  try {
+    const { data, error } = await supabase
+      .from('workout_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('date', { ascending: true })
+
+    if (error) throw error
+
+    return (Array.isArray(data) ? data : []).map(normalizeRemoteWorkoutLog)
+  } catch (err) {
+    console.error('Supabase workout log fetch error:', err)
+    return null
+  }
+}
+
+async function fetchBodyweightLogsFromSupabase(userId) {
+  try {
+    const { data, error } = await supabase
+      .from('bodyweight_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('date', { ascending: true })
+
+    if (error) throw error
+
+    return (Array.isArray(data) ? data : []).map(row => ({
+      date: new Date(row.date).toISOString(),
+      weight: Number(row.weight)
+    }))
+  } catch (err) {
+    console.error('Supabase bodyweight fetch error:', err)
+    return null
+  }
+}
+
+async function fetchProgramCustomizationsFromSupabase(userId) {
+  try {
+    const { data, error } = await supabase
+      .from('program_customizations')
+      .select('*')
+      .eq('user_id', userId)
+
+    if (error) throw error
+
+    const result = {}
+    if (Array.isArray(data)) {
+      data.forEach(row => {
+        result[row.original_exercise_id] = row.custom_exercise_json
+      })
+    }
+    return result
+  } catch (err) {
+    console.error('Supabase customizations fetch error:', err)
+    return null
+  }
+}
+
 export const useWorkoutStore = create((set, get) => ({
   // Program data
   program: defaultProgram,
@@ -225,6 +368,125 @@ export const useWorkoutStore = create((set, get) => ({
 
   // Sync status: 'saved' | 'syncing' | 'offline' | 'error'
   syncStatus: 'saved',
+
+  syncFromCloud: async ({ setSyncing = true } = {}) => {
+    if (cloudSyncPromise) {
+      return cloudSyncPromise
+    }
+
+    cloudSyncPromise = (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.user) {
+          set({ syncStatus: 'offline' })
+          return { ok: false, offline: true }
+        }
+
+        if (setSyncing) {
+          set({ syncStatus: 'syncing' })
+        }
+
+        const state = get()
+        const activeProgram = state.program
+
+        const [remoteProgress, remoteWorkouts, remoteBodyweight, remoteCustomizations] = await Promise.all([
+          fetchProgressFromSupabase(session.user.id),
+          fetchWorkoutLogsFromSupabase(session.user.id),
+          fetchBodyweightLogsFromSupabase(session.user.id),
+          fetchProgramCustomizationsFromSupabase(session.user.id)
+        ])
+
+        const statePatch = {}
+
+        if (remoteProgress) {
+          const cloudProgress = {
+            currentPhaseId: remoteProgress.current_phase_id,
+            currentWeek: remoteProgress.current_week,
+            currentDayIndex: remoteProgress.current_day_index,
+          }
+
+          if (isValidProgress(activeProgram, cloudProgress)) {
+            storage.saveProgress(cloudProgress)
+            statePatch.currentPhaseId = cloudProgress.currentPhaseId
+            statePatch.currentWeek = cloudProgress.currentWeek
+            statePatch.currentDayIndex = cloudProgress.currentDayIndex
+          }
+
+          if (remoteProgress.program_start) {
+            storage.saveProgramStart(remoteProgress.program_start)
+            statePatch.programStart = remoteProgress.program_start
+          }
+
+          if (remoteProgress.weight_unit) {
+            storage.saveWeightUnit(remoteProgress.weight_unit)
+            statePatch.weightUnit = remoteProgress.weight_unit
+          }
+
+          if (Number.isFinite(Number(remoteProgress.rest_timer_default))) {
+            const parsedRestTimer = Number(remoteProgress.rest_timer_default)
+            storage.saveRestTimerDefault(parsedRestTimer)
+            statePatch.restTimerDefault = parsedRestTimer
+          }
+
+          if (Array.isArray(remoteProgress.dismissed_alerts)) {
+            storage.saveDismissedAlerts(remoteProgress.dismissed_alerts)
+            statePatch.dismissedAlerts = remoteProgress.dismissed_alerts
+          }
+        }
+
+        let hasRemoteError = false
+
+        if (remoteWorkouts === null) {
+          hasRemoteError = true
+        } else {
+          const merged = mergeCompletedDays(get().completedDays, remoteWorkouts)
+          if (merged.changed) {
+            storage.saveCompletedDays(merged.items)
+            statePatch.completedDays = merged.items
+          }
+        }
+        
+        if (remoteBodyweight !== null) {
+          // simple replacement strategy for bodyweight (Supabase is source of truth for history)
+          // If local has logs not in remote, we might lose them without a merge. 
+          // For simplicity, we just take remote if it exists.
+          if (remoteBodyweight.length > 0) {
+            storage.saveBodyweightLogs(remoteBodyweight)
+            statePatch.bodyweightLogs = remoteBodyweight
+          }
+        }
+
+        if (remoteCustomizations !== null) {
+          // Merge remote over local
+          const localC = get().programCustomizations
+          const mergedC = { ...localC, ...remoteCustomizations }
+          storage.saveProgramCustomizations(mergedC)
+          statePatch.programCustomizations = mergedC
+        }
+
+        if (Object.keys(statePatch).length > 0) {
+          set(statePatch)
+        }
+
+        set({ syncStatus: hasRemoteError ? 'error' : 'saved' })
+        return {
+          ok: !hasRemoteError,
+          offline: false,
+          pulledWorkouts: Array.isArray(remoteWorkouts) ? remoteWorkouts.length : 0,
+        }
+      } catch (err) {
+        console.error('Failed to sync from Supabase:', err)
+        set({ syncStatus: navigator.onLine ? 'error' : 'offline' })
+        return { ok: false, offline: !navigator.onLine, error: err }
+      }
+    })()
+
+    try {
+      return await cloudSyncPromise
+    } finally {
+      cloudSyncPromise = null
+    }
+  },
 
   // Initialize store from localStorage, then Supabase if authenticated
   initializeStore: async () => {
@@ -265,7 +527,7 @@ export const useWorkoutStore = create((set, get) => ({
       })
     } else {
       const fallbackProgress = getDefaultProgressForProgram(activeProgram)
-      storage.saveProgress(fallbackProgress)
+      // Do NOT save to storage here, to prevent overwriting cloud sync asynchronously
       set(fallbackProgress)
     }
 
@@ -294,56 +556,8 @@ export const useWorkoutStore = create((set, get) => ({
       dismissedAlerts: savedDismissedAlerts,
     })
 
-    // Then try to fetch from Supabase
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.user) {
-        set({ syncStatus: 'offline' })
-        return
-      }
-
-      set({ syncStatus: 'syncing' })
-      const remoteProgress = await fetchProgressFromSupabase(session.user.id)
-
-      if (remoteProgress) {
-        const cloudProgress = {
-          currentPhaseId: remoteProgress.current_phase_id,
-          currentWeek: remoteProgress.current_week,
-          currentDayIndex: remoteProgress.current_day_index,
-        }
-
-        if (isValidProgress(activeProgram, cloudProgress)) {
-          storage.saveProgress(cloudProgress)
-          set(cloudProgress)
-        }
-
-        if (remoteProgress.program_start) {
-          const startDate = remoteProgress.program_start
-          storage.saveProgramStart(startDate)
-          set({ programStart: startDate })
-        }
-
-        if (remoteProgress.weight_unit) {
-          storage.saveWeightUnit(remoteProgress.weight_unit)
-          set({ weightUnit: remoteProgress.weight_unit })
-        }
-
-        if (Number.isFinite(remoteProgress.rest_timer_default)) {
-          storage.saveRestTimerDefault(remoteProgress.rest_timer_default)
-          set({ restTimerDefault: remoteProgress.rest_timer_default })
-        }
-
-        if (Array.isArray(remoteProgress.dismissed_alerts)) {
-          storage.saveDismissedAlerts(remoteProgress.dismissed_alerts)
-          set({ dismissedAlerts: remoteProgress.dismissed_alerts })
-        }
-      }
-
-      set({ syncStatus: 'saved' })
-    } catch (err) {
-      console.error('Failed to sync from Supabase:', err)
-      set({ syncStatus: 'offline' })
-    }
+    // Then fetch latest cloud changes so other-device updates appear locally.
+    await get().syncFromCloud({ setSyncing: true })
   },
 
   // Set program start date (first launch)
@@ -761,8 +975,10 @@ export const useWorkoutStore = create((set, get) => ({
         notes: updatedDay.sessionNotes || null,
         duration_minutes: updatedDay.durationMinutes,
         pr_exercises: updatedDay.prExercises || [],
-        week: updatedDay.week,
-        phase_id: updatedDay.phaseId
+        week_number: updatedDay.week,
+        day_index: updatedDay.dayIndex,
+        day_label: updatedDay.label,
+        phase_id: updatedDay.phaseId,
       }
       
       const { error } = await supabase
@@ -849,8 +1065,10 @@ export const useWorkoutStore = create((set, get) => ({
         notes: completedDay.sessionNotes || null,
         duration_minutes: completedDay.durationMinutes,
         pr_exercises: completedDay.prExercises || [],
-        week: completedDay.week,
-        phase_id: completedDay.phaseId
+        week_number: completedDay.week,
+        day_index: completedDay.dayIndex,
+        day_label: completedDay.label,
+        phase_id: completedDay.phaseId,
       }
 
       if (!navigator.onLine) {
@@ -964,36 +1182,77 @@ export const useWorkoutStore = create((set, get) => ({
   },
 
   // Log Bodyweight
-  logBodyweight: (weight) => {
+  logBodyweight: async (weight) => {
     const { bodyweightLogs } = get()
-    const today = new Date().toISOString().split('T')[0]
+    const today = new Date().toISOString()
+    const todaySimple = today.split('T')[0]
     
     // Check if entry for today already exists, if so update it
-    const existingIndex = bodyweightLogs.findIndex(log => log.date.startsWith(today))
+    const existingIndex = bodyweightLogs.findIndex(log => log.date.startsWith(todaySimple))
     
     let updated = [...bodyweightLogs]
     if (existingIndex >= 0) {
       updated[existingIndex].weight = weight
     } else {
-      updated.push({ date: new Date().toISOString(), weight })
+      updated.push({ date: today, weight })
     }
 
     // Keep chronological
     updated.sort((a, b) => new Date(a.date) - new Date(b.date))
     storage.saveBodyweightLogs(updated)
     set({ bodyweightLogs: updated })
+
+    // Sync to Supabase
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      const payload = {
+        user_id: session.user.id,
+        date: todaySimple,
+        weight: Number(weight)
+      }
+      
+      if (!navigator.onLine) {
+        enqueueMutation('bodyweight_logs', 'delete', null, { user_id: session.user.id, date: todaySimple })
+        enqueueMutation('bodyweight_logs', 'insert', payload)
+      } else {
+        await supabase.from('bodyweight_logs').delete().match({ user_id: session.user.id, date: todaySimple })
+        const { error } = await supabase.from('bodyweight_logs').insert(payload)
+        if (error) {
+          enqueueMutation('bodyweight_logs', 'delete', null, { user_id: session.user.id, date: todaySimple })
+          enqueueMutation('bodyweight_logs', 'insert', payload)
+        }
+      }
+    }
   },
 
   // Remove Bodyweight Log
-  removeBodyweightLog: (index) => {
+  removeBodyweightLog: async (index) => {
     const { bodyweightLogs } = get()
+    const target = bodyweightLogs[index]
+    if (!target) return
+
     const updated = bodyweightLogs.filter((_, i) => i !== index)
     storage.saveBodyweightLogs(updated)
     set({ bodyweightLogs: updated })
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      const dateSimple = target.date.split('T')[0]
+      const matchCriteria = { user_id: session.user.id, date: dateSimple }
+
+      if (!navigator.onLine) {
+        enqueueMutation('bodyweight_logs', 'delete', null, matchCriteria)
+      } else {
+        const { error } = await supabase.from('bodyweight_logs').delete().match(matchCriteria)
+        if (error) {
+          enqueueMutation('bodyweight_logs', 'delete', null, matchCriteria)
+        }
+      }
+    }
   },
 
   // Program Customizations
-  addProgramCustomization: (originalExId, newEx) => {
+  addProgramCustomization: async (originalExId, newEx) => {
     const { programCustomizations } = get()
     const updated = {
       ...programCustomizations,
@@ -1001,14 +1260,50 @@ export const useWorkoutStore = create((set, get) => ({
     }
     storage.saveProgramCustomizations(updated)
     set({ programCustomizations: updated })
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      const payload = {
+        user_id: session.user.id,
+        original_exercise_id: originalExId,
+        custom_exercise_json: { ...newEx, id: originalExId },
+        updated_at: new Date().toISOString()
+      }
+
+      if (!navigator.onLine) {
+        enqueueMutation('program_customizations', 'delete', null, { user_id: session.user.id, original_exercise_id: originalExId })
+        enqueueMutation('program_customizations', 'insert', payload)
+      } else {
+        await supabase.from('program_customizations').delete().match({ user_id: session.user.id, original_exercise_id: originalExId })
+        const { error } = await supabase.from('program_customizations').insert(payload)
+        if (error) {
+          enqueueMutation('program_customizations', 'delete', null, { user_id: session.user.id, original_exercise_id: originalExId })
+          enqueueMutation('program_customizations', 'insert', payload)
+        }
+      }
+    }
   },
 
-  removeProgramCustomization: (originalExId) => {
+  removeProgramCustomization: async (originalExId) => {
     const { programCustomizations } = get()
     const updated = { ...programCustomizations }
     delete updated[originalExId]
     storage.saveProgramCustomizations(updated)
     set({ programCustomizations: updated })
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      const matchCriteria = { user_id: session.user.id, original_exercise_id: originalExId }
+
+      if (!navigator.onLine) {
+        enqueueMutation('program_customizations', 'delete', null, matchCriteria)
+      } else {
+        const { error } = await supabase.from('program_customizations').delete().match(matchCriteria)
+        if (error) {
+          enqueueMutation('program_customizations', 'delete', null, matchCriteria)
+        }
+      }
+    }
   },
 
   // Export all data

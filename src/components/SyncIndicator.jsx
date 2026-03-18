@@ -4,6 +4,7 @@ import { flushSyncQueue, getSyncQueue } from '../utils/syncQueue'
 
 function SyncIndicator() {
   const syncStatus = useWorkoutStore((state) => state.syncStatus)
+  const syncFromCloud = useWorkoutStore((state) => state.syncFromCloud)
   const [pendingCount, setPendingCount] = useState(0)
   const [isManualSyncing, setIsManualSyncing] = useState(false)
 
@@ -15,7 +16,7 @@ function SyncIndicator() {
   }
 
   const config = statusConfig[syncStatus] || statusConfig.saved
-  const showRetryButton = pendingCount > 0 || syncStatus === 'offline' || syncStatus === 'error'
+  const showRetryButton = syncStatus !== 'syncing'
 
   const refreshPendingCount = useCallback(() => {
     setPendingCount(getSyncQueue().length)
@@ -53,10 +54,17 @@ function SyncIndicator() {
 
     try {
       const cleared = await flushSyncQueue()
+      let remoteOk = true
+
+      if (cleared && navigator.onLine) {
+        const cloud = await syncFromCloud({ setSyncing: false })
+        remoteOk = Boolean(cloud?.ok || cloud?.offline)
+      }
+
       const remaining = getSyncQueue().length
       setPendingCount(remaining)
 
-      if (cleared && remaining === 0) {
+      if (cleared && remaining === 0 && remoteOk) {
         useWorkoutStore.setState({ syncStatus: 'saved' })
       } else if (!navigator.onLine) {
         useWorkoutStore.setState({ syncStatus: 'offline' })
@@ -66,7 +74,7 @@ function SyncIndicator() {
     } finally {
       setIsManualSyncing(false)
     }
-  }, [isManualSyncing])
+  }, [isManualSyncing, syncFromCloud])
 
   return (
     <div className="inline-flex items-center gap-1.5">

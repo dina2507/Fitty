@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabaseClient'
 
 const SYNC_QUEUE_KEY = 'fitty_offline_sync_queue'
 const LEGACY_PROGRESS_OPTIONAL_FIELDS = ['weight_unit', 'rest_timer_default', 'dismissed_alerts']
+let flushQueuePromise = null
 
 function isUserProgressColumnMismatch(error) {
   const message = String(error?.message || '')
@@ -14,6 +15,21 @@ function stripLegacyProgressFields(payload) {
   LEGACY_PROGRESS_OPTIONAL_FIELDS.forEach((field) => {
     delete sanitized[field]
   })
+  return sanitized
+}
+
+function getMissingColumnName(error) {
+  const message = String(error?.message || '')
+  const match = message.match(/Could not find the '([^']+)' column/i)
+  return match?.[1] || null
+}
+
+function removeColumn(payload, columnName) {
+  if (!payload || typeof payload !== 'object' || !columnName) return payload
+  if (!(columnName in payload)) return payload
+
+  const sanitized = { ...payload }
+  delete sanitized[columnName]
   return sanitized
 }
 
@@ -99,6 +115,18 @@ export function enqueueMutation(table, action, payload, match = null) {
  * Stops on the first failure to maintain order, or processes all.
  */
 export async function flushSyncQueue() {
+  if (flushQueuePromise) {
+    return flushQueuePromise
+  }
+
+  flushQueuePromise = runFlushQueue().finally(() => {
+    flushQueuePromise = null
+  })
+
+  return flushQueuePromise
+}
+
+async function runFlushQueue() {
   if (!navigator.onLine) return false
 
   const queue = getSyncQueue()
@@ -115,17 +143,39 @@ export async function flushSyncQueue() {
       let requestJob = job
       let { error } = await buildRequest(requestJob)
 
-      if (error && requestJob.table === 'user_progress' && requestJob.action === 'upsert' && isUserProgressColumnMismatch(error)) {
-        requestJob = {
-          ...requestJob,
-          payload: stripLegacyProgressFields(requestJob.payload),
+      let attempts = 0
+      while (error && attempts < 6) {
+        let nextPayload = requestJob.payload
+
+        if (requestJob.table === 'user_progress' && requestJob.action === 'upsert' && isUserProgressColumnMismatch(error)) {
+          nextPayload = stripLegacyProgressFields(requestJob.payload)
+        } else if (error.code === 'PGRST204') {
+          const missingColumn = getMissingColumnName(error)
+          nextPayload = removeColumn(requestJob.payload, missingColumn)
+        } else {
+          break
         }
 
-        const fallbackResult = await buildRequest(requestJob)
-        error = fallbackResult.error
+        if (JSON.stringify(nextPayload) === JSON.stringify(requestJob.payload)) {
+          break
+        }
+
+        requestJob = {
+          ...requestJob,
+          payload: nextPayload,
+        }
+
+        const retry = await buildRequest(requestJob)
+        error = retry.error
+        attempts += 1
       }
 
       if (error) {
+        // Preserve any payload sanitization so the next retry can keep progressing.
+        if (requestJob !== job && remainingQueue.length > 0) {
+          remainingQueue[0] = requestJob
+        }
+
         console.error(`Failed to sync queued job ${job.id}:`, error)
         // Stop processing further jobs to preserve write order.
         break

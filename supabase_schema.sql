@@ -130,3 +130,60 @@ create policy "Users can update own workouts"
 create policy "Users can delete own workouts"
   on custom_workouts for delete
   using (auth.uid() = user_id);
+
+-- 5. bodyweight_logs — tracks user bodyweight over time
+create table if not exists bodyweight_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users not null,
+  date date not null,
+  weight numeric not null,
+  created_at timestamptz default now(),
+  unique(user_id, date)
+);
+
+alter table bodyweight_logs enable row level security;
+
+create policy "Users can view own bodyweight"
+  on bodyweight_logs for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert own bodyweight"
+  on bodyweight_logs for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update own bodyweight"
+  on bodyweight_logs for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete own bodyweight"
+  on bodyweight_logs for delete
+  using (auth.uid() = user_id);
+
+-- 6. program_customizations — stores permanent exercise swaps
+create table if not exists program_customizations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users not null,
+  original_exercise_id text not null,
+  custom_exercise_json jsonb not null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique(user_id, original_exercise_id)
+);
+
+alter table program_customizations enable row level security;
+
+create policy "Users can view own customizations"
+  on program_customizations for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert own customizations"
+  on program_customizations for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update own customizations"
+  on program_customizations for update
+  using (auth.uid() = user_id);
+
+create policy "Users can delete own customizations"
+  on program_customizations for delete
+  using (auth.uid() = user_id);

@@ -442,16 +442,16 @@ function SettingsPage() {
       {/* Account Section */}
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Account</h2>
-        <div className="mt-3 flex items-center justify-between">
+        <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">Logged in as</p>
-            <p className="font-medium text-zinc-900 dark:text-zinc-100">{user?.email || '—'}</p>
+            <p className="font-medium truncate text-zinc-900 dark:text-zinc-100">{user?.email || '—'}</p>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-col sm:flex-row w-full sm:w-auto gap-2">
             <button
               type="button"
               onClick={onLogout}
-              className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="w-full sm:w-auto text-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               Logout
             </button>
@@ -459,7 +459,7 @@ function SettingsPage() {
               type="button"
               onClick={onDeleteAccount}
               disabled={isDeletingAccount}
-              className="rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+              className="w-full sm:w-auto text-center rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
             >
               {isDeletingAccount ? 'Deleting...' : 'Delete Account'}
             </button>
@@ -570,8 +570,8 @@ function SettingsPage() {
               </select>
             </label>
 
-            <div className="flex items-end">
-              <label className="cursor-pointer rounded-full border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800">
+            <div className="flex md:items-end mt-2 md:mt-0">
+              <label className="cursor-pointer block text-center w-full md:w-auto rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800">
                 {isImportingProgram ? 'Importing...' : 'Import Plan JSON'}
                 <input
                   type="file"
@@ -591,18 +591,18 @@ function SettingsPage() {
             Rename once and it updates everywhere this plan is shown.
           </p>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2">
             <input
               type="text"
               value={planNameInput}
               onChange={(event) => setPlanNameInput(event.target.value)}
               onBlur={onSavePlanDisplayName}
-              className="min-w-[14rem] flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+              className="w-full sm:w-[14rem] rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
             />
             <button
               type="button"
               onClick={onSavePlanDisplayName}
-              className="rounded-full border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="w-full sm:w-auto text-center flex-shrink-0 rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               Save Name
             </button>
@@ -657,12 +657,12 @@ function SettingsPage() {
               </select>
             </label>
 
-            <div className="flex items-end">
+            <div className="flex md:items-end mt-2 md:mt-0">
               <button
                 type="button"
                 onClick={onApplyProgramPosition}
                 disabled={isUpdatingProgramPosition}
-                className="rounded-full border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                className="w-full md:w-auto text-center rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
                 {isUpdatingProgramPosition ? 'Updating...' : 'Apply'}
               </button>
@@ -688,25 +688,25 @@ function SettingsPage() {
       {/* Backup & Data */}
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Backup & Data</h3>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full">
           <button
             type="button"
             onClick={onExport}
-            className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700"
+            className="w-full sm:w-auto text-center rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-zinc-700"
           >
             Export Data
           </button>
           <button
             type="button"
             onClick={onImport}
-            className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            className="w-full sm:w-auto text-center rounded-full border border-zinc-300 px-5 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
           >
             Import Data
           </button>
           <button
             type="button"
             onClick={onReset}
-            className="rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+            className="w-full sm:w-auto text-center rounded-full border border-red-300 px-5 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50"
           >
             Reset Program
           </button>
@@ -718,40 +718,42 @@ function SettingsPage() {
             Download structured CSVs and a polished monthly training report.
           </p>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-row lg:flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={onExportAllWorkoutsCsv}
               disabled={isExportingAllCsv}
-              className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="w-full text-center rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
-              {isExportingAllCsv ? 'Preparing CSV...' : 'Export Workout CSV (Excel)'}
+              {isExportingAllCsv ? 'Preparing CSV...' : 'Export Workouts (CSV)'}
             </button>
 
             <button
               type="button"
               onClick={onExportCsvZip}
               disabled={isExportingCsv}
-              className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              className="w-full text-center rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
-              {isExportingCsv ? 'Preparing CSV...' : 'Export CSV Zip'}
+              {isExportingCsv ? 'Preparing Zip...' : 'Export CSV Archive'}
             </button>
 
-            <input
-              type="month"
-              value={reportMonth}
-              onChange={(event) => setReportMonth(event.target.value)}
-              className="rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-            />
+            <div className="flex w-full gap-2 lg:w-auto">
+              <input
+                type="month"
+                value={reportMonth}
+                onChange={(event) => setReportMonth(event.target.value)}
+                className="flex-1 lg:w-32 rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+              />
 
-            <button
-              type="button"
-              onClick={onExportMonthlyPdf}
-              disabled={isExportingMonthlyPdf}
-              className="rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-            >
-              {isExportingMonthlyPdf ? 'Generating PDF...' : 'Export Monthly PDF'}
-            </button>
+              <button
+                type="button"
+                onClick={onExportMonthlyPdf}
+                disabled={isExportingMonthlyPdf}
+                className="flex-1 text-center rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                {isExportingMonthlyPdf ? 'Generating...' : 'Export PDF'}
+              </button>
+            </div>
           </div>
 
           <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
