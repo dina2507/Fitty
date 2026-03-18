@@ -43,22 +43,35 @@ function WorkoutPage() {
     () => programState.phases.find((phase) => phase.id === currentPhaseId),
     [programState, currentPhaseId],
   )
-  
+
   const baseProgramDay = getCurrentDay()
-  
+
   const todaysWorkout = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0]
-    return completedDays.find(d => d.date.startsWith(todayStr))
+    return completedDays.find((d) => d.date.startsWith(todayStr))
   }, [completedDays])
 
+  // Only treat today's completed workout as the active program day
+  // if it matches the current program position. This prevents Program
+  // Position overrides (e.g. jumping to a different day) from being
+  // silently ignored when a workout was already completed earlier today.
+  const isSameProgramSlotAsToday = useMemo(() => {
+    if (!todaysWorkout || !baseProgramDay) return false
+    return (
+      todaysWorkout.phaseId === currentPhaseId
+      && todaysWorkout.week === currentWeek
+      && todaysWorkout.dayIndex === baseProgramDay.dayIndex
+    )
+  }, [todaysWorkout, baseProgramDay, currentPhaseId, currentWeek])
+
   const programDay = useMemo(() => {
-    if (todaysWorkout) {
-       const phase = programState.phases.find(p => p.id === todaysWorkout.phaseId)
-       const week = phase?.weeks?.[todaysWorkout.week - 1]
-       return week?.days?.[todaysWorkout.dayIndex] || baseProgramDay
+    if (todaysWorkout && isSameProgramSlotAsToday) {
+      const phase = programState.phases.find((p) => p.id === todaysWorkout.phaseId)
+      const week = phase?.weeks?.[todaysWorkout.week - 1]
+      return week?.days?.[todaysWorkout.dayIndex] || baseProgramDay
     }
     return baseProgramDay
-  }, [todaysWorkout, programState, baseProgramDay])
+  }, [todaysWorkout, isSameProgramSlotAsToday, programState, baseProgramDay])
 
   const [activeExercises, setActiveExercises] = useState([])
   const [exerciseLog, setExerciseLog] = useState({})
@@ -264,7 +277,7 @@ function WorkoutPage() {
     } catch {}
 
     // 3. Fresh start from program.json OR edit today's workout
-    if (todaysWorkout && !activeCustomTemplate) {
+    if (todaysWorkout && isSameProgramSlotAsToday && !activeCustomTemplate) {
       const fullExercises = (todaysWorkout.exercises || []).map(ex => {
         const orig = programDay?.exercises?.find(o => o.id === ex.exerciseId) || {}
         return { ...orig, ...ex, id: ex.exerciseId || orig.id }

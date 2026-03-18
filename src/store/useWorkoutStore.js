@@ -153,6 +153,33 @@ function getDefaultProgressForProgram(programData) {
   }
 }
 
+// Compare two progress positions within the current program.
+// Returns -1 if a is before b, 0 if equal, 1 if after.
+function compareProgressPosition(a, b, programData) {
+  if (!a || !b || !programData?.phases) return 0
+
+  const phaseOrder = new Map()
+  programData.phases.forEach((phase, index) => {
+    phaseOrder.set(phase.id, index)
+  })
+
+  const buildOrdinal = (progress) => {
+    const phaseIdx = phaseOrder.has(progress.currentPhaseId)
+      ? phaseOrder.get(progress.currentPhaseId)
+      : 0
+    const week = Number(progress.currentWeek) || 1
+    const dayIndex = Number(progress.currentDayIndex) || 0
+    // This does not need to be exact day count, just a stable ordering.
+    return phaseIdx * 10000 + (week - 1) * 100 + dayIndex
+  }
+
+  const aOrd = buildOrdinal(a)
+  const bOrd = buildOrdinal(b)
+
+  if (aOrd === bOrd) return 0
+  return aOrd < bOrd ? -1 : 1
+}
+
 function buildProgramLibrary(importedPrograms = []) {
   const builtIn = {
     id: BUILT_IN_PROGRAM_ID,
@@ -424,11 +451,24 @@ export const useWorkoutStore = create((set, get) => ({
           currentDayIndex: remoteProgress.current_day_index,
         }
 
+        const localProgress = storage.getProgress() || {
+          currentPhaseId: state.currentPhaseId,
+          currentWeek: state.currentWeek,
+          currentDayIndex: state.currentDayIndex,
+        }
+
+        // Only apply remote progress if it is a valid position AND
+        // it is ahead of or equal to the local position in the program.
+        // This prevents a stale cloud value from pulling the user back
+        // after they manually jump to a later day.
         if (isValidProgress(activeProgram, cloudProgress)) {
-          storage.saveProgress(cloudProgress)
-          statePatch.currentPhaseId = cloudProgress.currentPhaseId
-          statePatch.currentWeek = cloudProgress.currentWeek
-          statePatch.currentDayIndex = cloudProgress.currentDayIndex
+          const cmp = compareProgressPosition(cloudProgress, localProgress, activeProgram)
+          if (cmp >= 0) {
+            storage.saveProgress(cloudProgress)
+            statePatch.currentPhaseId = cloudProgress.currentPhaseId
+            statePatch.currentWeek = cloudProgress.currentWeek
+            statePatch.currentDayIndex = cloudProgress.currentDayIndex
+          }
         }
 
         if (remoteProgress.program_start) {
