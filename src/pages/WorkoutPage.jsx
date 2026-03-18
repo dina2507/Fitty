@@ -80,7 +80,6 @@ function WorkoutPage() {
   const [isSavingWorkout, setIsSavingWorkout] = useState(false)
   const [startTime, setStartTime] = useState(() => Date.now())
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
-  const [activeWorkoutTab, setActiveWorkoutTab] = useState('workout')
   const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false)
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState([])
 
@@ -188,7 +187,7 @@ function WorkoutPage() {
     })
   }, [activeExercises, scheduledForCurrentDay])
 
-  const hasRecommendedTab = Boolean(!activeCustomTemplate && !programDay?.isRest && scheduledForCurrentDay.length)
+  const hasRecommendedSection = Boolean(!activeCustomTemplate && !programDay?.isRest && recommendedExercises.length)
 
   useEffect(() => {
     setPickerWeekNumber(String(currentWeek))
@@ -216,12 +215,6 @@ function WorkoutPage() {
       setScheduleDayIndex(String(scheduleDayOptions[0].dayIndex))
     }
   }, [scheduleDayIndex, scheduleDayOptions])
-
-  useEffect(() => {
-    if (!hasRecommendedTab && activeWorkoutTab === 'recommended') {
-      setActiveWorkoutTab('workout')
-    }
-  }, [activeWorkoutTab, hasRecommendedTab])
 
   // Initialize from Custom Template OR program day OR restored auto-save
   useEffect(() => {
@@ -606,62 +599,57 @@ function WorkoutPage() {
   const appendRecommendedExercises = useCallback((items) => {
     if (!Array.isArray(items) || items.length === 0) return 0
 
+    const existingOriginalIds = new Set(
+      activeExercises.map((exercise) => exercise.originalExerciseId || exercise.id),
+    )
+
     const addedExercises = []
 
-    setActiveExercises((prev) => {
-      const next = [...prev]
-      const existingOriginalIds = new Set(prev.map((exercise) => exercise.originalExerciseId || exercise.id))
+    items.forEach((item) => {
+      const sourceId = item.originalExerciseId || item.id
+      if (existingOriginalIds.has(sourceId)) return
 
-      items.forEach((item) => {
-        const sourceId = item.originalExerciseId || item.id
-        if (existingOriginalIds.has(sourceId)) return
+      existingOriginalIds.add(sourceId)
+      const sessionId = `recommended_${item.scheduledTransferId || sourceId}`
+      addedExercises.push({
+        ...item,
+        id: sessionId,
+        originalExerciseId: sourceId,
+      })
+    })
 
-        existingOriginalIds.add(sourceId)
-        const sessionId = `recommended_${item.scheduledTransferId || sourceId}`
-        const exerciseToAdd = {
-          ...item,
-          id: sessionId,
-          originalExerciseId: sourceId,
+    if (addedExercises.length === 0) return 0
+
+    setActiveExercises((prev) => [...prev, ...addedExercises])
+
+    setExerciseLog((prev) => {
+      const next = { ...prev }
+
+      addedExercises.forEach((exercise) => {
+        if (next[exercise.id]) return
+
+        const numSets = exercise.workingSets || exercise.default_sets || 1
+        next[exercise.id] = {
+          sets: Array.from({ length: numSets }, (_, index) => ({
+            setNumber: index + 1,
+            weight: '',
+            reps: '',
+            rpe: '',
+          })),
+          notes: '',
         }
-
-        next.push(exerciseToAdd)
-        addedExercises.push(exerciseToAdd)
       })
 
       return next
     })
 
-    if (addedExercises.length > 0) {
-      setExerciseLog((prev) => {
-        const next = { ...prev }
-
-        addedExercises.forEach((exercise) => {
-          if (next[exercise.id]) return
-
-          const numSets = exercise.workingSets || exercise.default_sets || 1
-          next[exercise.id] = {
-            sets: Array.from({ length: numSets }, (_, index) => ({
-              setNumber: index + 1,
-              weight: '',
-              reps: '',
-              rpe: '',
-            })),
-            notes: '',
-          }
-        })
-
-        return next
-      })
-    }
-
     return addedExercises.length
-  }, [])
+  }, [activeExercises])
 
   const addRecommendedExercise = useCallback((exercise) => {
     const addedCount = appendRecommendedExercises([exercise])
     if (addedCount > 0) {
       setSessionNotice(`${exercise.name} added from recommendations.`)
-      setActiveWorkoutTab('workout')
       return
     }
 
@@ -672,7 +660,6 @@ function WorkoutPage() {
     const addedCount = appendRecommendedExercises(recommendedExercises)
     if (addedCount > 0) {
       setSessionNotice(`${addedCount} recommended exercise${addedCount === 1 ? '' : 's'} added to today's workout.`)
-      setActiveWorkoutTab('workout')
       return
     }
 
@@ -779,12 +766,71 @@ function WorkoutPage() {
     navigate('/')
   }
 
+  const resetToDefaultDaySession = useCallback(() => {
+    localStorage.removeItem(AUTOSAVE_KEY)
+    clearCustomWorkoutTemplate()
+    setShowProgramDayPicker(false)
+    setExerciseToSchedule(null)
+    setDismissedSuggestionIds([])
+
+    const fallbackProgramDay = baseProgramDay || programDay
+    if (!fallbackProgramDay || fallbackProgramDay.isRest) {
+      setActiveExercises([])
+      setExerciseLog({})
+      setSessionNotes('')
+      setStartTime(Date.now())
+      setSessionNotice('Back to your default day workout.')
+      return
+    }
+
+    if (todaysWorkout) {
+      const fullExercises = (todaysWorkout.exercises || []).map((loggedExercise) => {
+        const original = fallbackProgramDay.exercises?.find(
+          (candidate) => candidate.id === loggedExercise.exerciseId,
+        ) || {}
+
+        return {
+          ...original,
+          ...loggedExercise,
+          id: loggedExercise.exerciseId || original.id || loggedExercise.id,
+        }
+      })
+
+      const restoredLog = {}
+      ;(todaysWorkout.exercises || []).forEach((loggedExercise) => {
+        const sourceId = loggedExercise.exerciseId || loggedExercise.id
+        if (!sourceId) return
+
+        restoredLog[sourceId] = {
+          sets: loggedExercise.sets || [],
+          notes: loggedExercise.notes || '',
+        }
+      })
+
+      setActiveExercises(fullExercises)
+      setExerciseLog(restoredLog)
+      setSessionNotes(todaysWorkout.sessionNotes || todaysWorkout.session_notes || '')
+      if (todaysWorkout.duration_minutes) {
+        setStartTime(Date.now() - todaysWorkout.duration_minutes * 60000)
+      } else {
+        setStartTime(Date.now())
+      }
+      setSessionNotice('Back to your default day workout.')
+      return
+    }
+
+    const nextExercises = [...(fallbackProgramDay.exercises || [])]
+    setActiveExercises(nextExercises)
+    setExerciseLog(buildInitialLog(nextExercises))
+    setSessionNotes('')
+    setStartTime(Date.now())
+    setSessionNotice('Back to your default day workout.')
+  }, [baseProgramDay, clearCustomWorkoutTemplate, programDay, todaysWorkout])
+
   // ── Cancel/Discard Workout ──
   const onCancelCustom = () => {
     if (activeCustomTemplate?.templateSource === 'program') {
-      localStorage.removeItem(AUTOSAVE_KEY)
-      clearCustomWorkoutTemplate()
-      setSessionNotice('Back to your default day workout.')
+      resetToDefaultDaySession()
       return
     }
 
@@ -981,75 +1027,44 @@ function WorkoutPage() {
             />
           )}
 
-          {hasRecommendedTab && (
-            <section className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
-              <div className="flex gap-1 rounded-lg bg-zinc-100 p-1">
+          {hasRecommendedSection && (
+            <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Recommended</p>
+                  <p className="text-xs text-amber-800">Moved exercises queued for this day.</p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setActiveWorkoutTab('workout')}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    activeWorkoutTab === 'workout'
-                      ? 'bg-white text-zinc-900 shadow-sm'
-                      : 'text-zinc-500 hover:text-zinc-800'
-                  }`}
+                  onClick={addAllRecommendedExercises}
+                  className="rounded-full border border-amber-300 bg-white px-3 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
                 >
-                  Workout
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveWorkoutTab('recommended')}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    activeWorkoutTab === 'recommended'
-                      ? 'bg-white text-zinc-900 shadow-sm'
-                      : 'text-zinc-500 hover:text-zinc-800'
-                  }`}
-                >
-                  Recommended ({recommendedExercises.length})
+                  Add All ({recommendedExercises.length})
                 </button>
               </div>
 
-              {activeWorkoutTab === 'recommended' && (
-                <div className="mt-3 grid gap-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-zinc-500">Exercises you moved to this day.</p>
+              <div className="mt-3 grid gap-2">
+                {recommendedExercises.map((exercise) => (
+                  <div key={exercise.scheduledTransferId || exercise.id} className="flex items-center justify-between rounded-lg border border-amber-200 bg-white px-3 py-2">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-900">{exercise.name}</p>
+                      <p className="text-[11px] text-zinc-500">{exercise.workingSets || '?'} sets × {exercise.reps || '?'}</p>
+                    </div>
                     <button
                       type="button"
-                      onClick={addAllRecommendedExercises}
-                      disabled={recommendedExercises.length === 0}
-                      className="rounded-full border border-zinc-300 px-3 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-40"
+                      onClick={() => addRecommendedExercise(exercise)}
+                      className="rounded-full bg-zinc-900 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-zinc-700"
                     >
-                      Add All
+                      Add
                     </button>
                   </div>
-
-                  {recommendedExercises.length === 0 && (
-                    <p className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
-                      No pending recommendations. Everything is already in your workout.
-                    </p>
-                  )}
-
-                  {recommendedExercises.map((exercise) => (
-                    <div key={exercise.scheduledTransferId || exercise.id} className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <div>
-                        <p className="text-sm font-medium text-zinc-900">{exercise.name}</p>
-                        <p className="text-[11px] text-zinc-500">{exercise.workingSets || '?'} sets × {exercise.reps || '?'}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => addRecommendedExercise(exercise)}
-                        className="rounded-full bg-zinc-900 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-zinc-700"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+                ))}
+              </div>
             </section>
           )}
 
           {/* Exercise Cards */}
-          {activeWorkoutTab === 'workout' && activeExercises.map((exercise, exIndex) => (
+          {activeExercises.map((exercise, exIndex) => (
             <ExerciseCard
               key={exercise.id}
               exercise={exercise}
@@ -1079,7 +1094,7 @@ function WorkoutPage() {
             />
           ))}
 
-          {activeWorkoutTab === 'workout' && activeExercises.length === 0 && (
+          {activeExercises.length === 0 && (
             <div className="rounded-xl border border-dashed border-zinc-300 bg-white p-8 text-center">
               <p className="text-sm text-zinc-500">No exercises yet. Tap "+ Add Exercise" to get started.</p>
             </div>
