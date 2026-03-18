@@ -1,6 +1,58 @@
 import { supabase } from '../lib/supabaseClient'
 
 const SYNC_QUEUE_KEY = 'fitty_offline_sync_queue'
+const LEGACY_PROGRESS_OPTIONAL_FIELDS = ['weight_unit', 'rest_timer_default', 'dismissed_alerts']
+
+function isUserProgressColumnMismatch(error) {
+  const message = String(error?.message || '')
+  return error?.code === 'PGRST204' && message.includes('user_progress')
+}
+
+function stripLegacyProgressFields(payload) {
+  if (!payload || typeof payload !== 'object') return payload
+  const sanitized = { ...payload }
+  LEGACY_PROGRESS_OPTIONAL_FIELDS.forEach((field) => {
+    delete sanitized[field]
+  })
+  return sanitized
+}
+
+function deriveMatch(job) {
+  if (job?.match) return job.match
+
+  // Backward compatibility for older queued workout update jobs.
+  if (job?.table === 'workout_logs' && job?.action === 'update') {
+    const userId = job?.payload?.user_id
+    const date = job?.payload?.date
+    if (userId && date) {
+      return { user_id: userId, date }
+    }
+  }
+
+  return null
+}
+
+function buildRequest(job) {
+  let req = supabase.from(job.table)
+
+  if (job.action === 'upsert') {
+    const upsertOptions = job.table === 'user_progress' ? { onConflict: 'user_id' } : undefined
+    req = req.upsert(job.payload, upsertOptions)
+  } else if (job.action === 'insert') {
+    req = req.insert(job.payload)
+  } else if (job.action === 'delete') {
+    req = req.delete()
+  } else if (job.action === 'update') {
+    req = req.update(job.payload)
+  }
+
+  const match = deriveMatch(job)
+  if (match) {
+    req = req.match(match)
+  }
+
+  return req
+}
 
 /**
  * Ensures the queue exists in localStorage.
@@ -60,27 +112,22 @@ export async function flushSyncQueue() {
 
   for (const job of queue) {
     try {
-      let req = supabase.from(job.table)
+      let requestJob = job
+      let { error } = await buildRequest(requestJob)
 
-      if (job.action === 'upsert') {
-        req = req.upsert(job.payload)
-      } else if (job.action === 'insert') {
-        req = req.insert(job.payload)
-      } else if (job.action === 'delete') {
-        req = req.delete()
-      } else if (job.action === 'update') {
-        req = req.update(job.payload)
+      if (error && requestJob.table === 'user_progress' && requestJob.action === 'upsert' && isUserProgressColumnMismatch(error)) {
+        requestJob = {
+          ...requestJob,
+          payload: stripLegacyProgressFields(requestJob.payload),
+        }
+
+        const fallbackResult = await buildRequest(requestJob)
+        error = fallbackResult.error
       }
-
-      if (job.match) {
-        req = req.match(job.match)
-      }
-
-      const { error } = await req
 
       if (error) {
         console.error(`Failed to sync queued job ${job.id}:`, error)
-        // Stop processing further jobs to preserve write order
+        // Stop processing further jobs to preserve write order.
         break
       }
 

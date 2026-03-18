@@ -14,31 +14,53 @@ import ProgramPage from './pages/ProgramPage'
 import WorkoutBuilder from './pages/WorkoutBuilder'
 import StatsPage from './pages/StatsPage'
 import { useWorkoutStore } from './store/useWorkoutStore'
-import { flushSyncQueue } from './utils/syncQueue'
+import { flushSyncQueue, getSyncQueue } from './utils/syncQueue'
 
 function useSyncQueueListener() {
-  const syncStatus = useWorkoutStore((state) => state.syncStatus)
-
   useEffect(() => {
+    const applySyncStatus = (cleared) => {
+      const pending = getSyncQueue().length
+
+      if (cleared && pending === 0) {
+        useWorkoutStore.setState({ syncStatus: 'saved' })
+        return
+      }
+
+      if (!navigator.onLine) {
+        useWorkoutStore.setState({ syncStatus: 'offline' })
+      } else if (pending > 0) {
+        useWorkoutStore.setState({ syncStatus: 'error' })
+      }
+    }
+
+    const flushAndUpdate = async () => {
+      const cleared = await flushSyncQueue()
+      applySyncStatus(cleared)
+    }
+
     // Attempt flush on mount if online
     if (navigator.onLine) {
-      flushSyncQueue().then(cleared => {
-        if (cleared && useWorkoutStore.getState().syncStatus === 'offline') {
-          useWorkoutStore.setState({ syncStatus: 'saved' })
-        }
-      })
+      flushAndUpdate()
     }
 
     // Attempt flush when reconnecting
-    const handleOnline = async () => {
-      const cleared = await flushSyncQueue()
-      if (cleared) {
-        useWorkoutStore.setState({ syncStatus: 'saved' })
+    const handleOnline = () => {
+      flushAndUpdate()
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        flushAndUpdate()
       }
     }
 
     window.addEventListener('online', handleOnline)
-    return () => window.removeEventListener('online', handleOnline)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [])
 }
 

@@ -6,6 +6,21 @@ import { enqueueMutation } from '../utils/syncQueue'
 import defaultProgram from '../data/program.json'
 
 const BUILT_IN_PROGRAM_ID = 'built_in_default_program'
+const LEGACY_PROGRESS_OPTIONAL_FIELDS = ['weight_unit', 'rest_timer_default', 'dismissed_alerts']
+
+function isUserProgressColumnMismatch(error) {
+  const message = String(error?.message || '')
+  return error?.code === 'PGRST204' && message.includes('user_progress')
+}
+
+function stripLegacyProgressFields(payload) {
+  if (!payload || typeof payload !== 'object') return payload
+  const sanitized = { ...payload }
+  LEGACY_PROGRESS_OPTIONAL_FIELDS.forEach((field) => {
+    delete sanitized[field]
+  })
+  return sanitized
+}
 
 function getProgramSignature(programData) {
   try {
@@ -103,34 +118,56 @@ function isValidProgress(data, progress) {
 
 // Helper: upsert user_progress to Supabase
 async function syncProgressToSupabase(userId, progress, programStart, settings = {}) {
-  try {
-    const payload = {
-      user_id: userId,
-      current_phase_id: progress.currentPhaseId,
-      current_week: progress.currentWeek,
-      current_day_index: progress.currentDayIndex,
-      program_start: programStart || null,
-      weight_unit: settings.weightUnit || 'kg',
-      rest_timer_default: Number.isFinite(settings.restTimerDefault)
-        ? Math.max(30, settings.restTimerDefault)
-        : 120,
-      dismissed_alerts: Array.isArray(settings.dismissedAlerts) ? settings.dismissedAlerts : [],
-      updated_at: new Date().toISOString(),
-    }
+  const basePayload = {
+    user_id: userId,
+    current_phase_id: progress.currentPhaseId,
+    current_week: progress.currentWeek,
+    current_day_index: progress.currentDayIndex,
+    program_start: programStart || null,
+    updated_at: new Date().toISOString(),
+  }
 
+  const payload = {
+    ...basePayload,
+    weight_unit: settings.weightUnit || 'kg',
+    rest_timer_default: Number.isFinite(settings.restTimerDefault)
+      ? Math.max(30, settings.restTimerDefault)
+      : 120,
+    dismissed_alerts: Array.isArray(settings.dismissedAlerts) ? settings.dismissedAlerts : [],
+  }
+
+  const compatibilityPayload = stripLegacyProgressFields(payload)
+
+  try {
     if (!navigator.onLine) {
       enqueueMutation('user_progress', 'upsert', payload)
       return { offline: true }
     }
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from('user_progress')
       .upsert(payload, { onConflict: 'user_id' })
 
+    if (error && isUserProgressColumnMismatch(error)) {
+      const fallback = await supabase
+        .from('user_progress')
+        .upsert(compatibilityPayload, { onConflict: 'user_id' })
+
+      if (!fallback.error) {
+        return { ok: true, compatibilityMode: true }
+      }
+
+      error = fallback.error
+    }
+
     if (error) {
-      console.warn('Network error, queueing progress sync:', error)
-      enqueueMutation('user_progress', 'upsert', payload)
-      return { offline: true }
+      console.warn('Progress sync failed, queueing retry:', error)
+      enqueueMutation(
+        'user_progress',
+        'upsert',
+        isUserProgressColumnMismatch(error) ? compatibilityPayload : payload,
+      )
+      return { error, queued: true }
     }
     
     return { ok: true }
@@ -740,7 +777,10 @@ export const useWorkoutStore = create((set, get) => ({
         .match({ user_id: session.user.id, date: updatedDay.date })
         
       if (error) {
-        enqueueMutation('workout_logs', 'update', logPayload)
+        enqueueMutation('workout_logs', 'update', logPayload, {
+          user_id: session.user.id,
+          date: updatedDay.date,
+        })
       }
       set({ syncStatus: 'saved' })
     }
