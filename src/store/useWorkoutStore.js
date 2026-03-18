@@ -3,7 +3,85 @@ import { storage } from '../utils/storage'
 import { getNextDay } from '../utils/progressTracker'
 import { supabase } from '../lib/supabaseClient'
 import { enqueueMutation } from '../utils/syncQueue'
-import program from '../data/program.json'
+import defaultProgram from '../data/program.json'
+
+const BUILT_IN_PROGRAM_ID = 'built_in_default_program'
+
+function getProgramSignature(programData) {
+  try {
+    return JSON.stringify(programData?.phases || [])
+  } catch {
+    return ''
+  }
+}
+
+function normalizeProgramData(payload) {
+  const candidate = payload?.phases
+    ? payload
+    : (payload?.program?.phases ? payload.program : null)
+
+  if (!candidate || !Array.isArray(candidate.phases) || candidate.phases.length === 0) {
+    return null
+  }
+
+  const hasValidShape = candidate.phases.every((phase) => {
+    if (!phase || typeof phase.id !== 'string' || !Array.isArray(phase.weeks) || phase.weeks.length === 0) {
+      return false
+    }
+
+    return phase.weeks.every((week) => {
+      return Number.isFinite(Number(week.weekNumber))
+        && Array.isArray(week.days)
+        && week.days.length > 0
+    })
+  })
+
+  return hasValidShape ? candidate : null
+}
+
+function getDefaultProgressForProgram(programData) {
+  const phase = programData?.phases?.[0]
+  const week = phase?.weeks?.[0]
+  const firstTrainDay = week?.days?.find((day) => !day?.isRest)
+  const fallbackDay = week?.days?.[0]
+
+  return {
+    currentPhaseId: phase?.id || 'phase_1',
+    currentWeek: Number.isFinite(Number(week?.weekNumber)) ? Number(week.weekNumber) : 1,
+    currentDayIndex: Number.isFinite(Number(firstTrainDay?.dayIndex))
+      ? Number(firstTrainDay.dayIndex)
+      : (Number.isFinite(Number(fallbackDay?.dayIndex)) ? Number(fallbackDay.dayIndex) : 0),
+  }
+}
+
+function buildProgramLibrary(importedPrograms = []) {
+  const builtIn = {
+    id: BUILT_IN_PROGRAM_ID,
+    name: 'Dina Workout plan',
+    source: 'built_in',
+    signature: getProgramSignature(defaultProgram),
+    importedAt: null,
+    program: defaultProgram,
+  }
+
+  const imported = (Array.isArray(importedPrograms) ? importedPrograms : [])
+    .map((item, index) => {
+      const normalized = normalizeProgramData(item?.program || item)
+      if (!normalized) return null
+
+      return {
+        id: item?.id || `imported_${index + 1}`,
+        name: String(item?.name || `Imported Plan ${index + 1}`),
+        source: 'imported',
+        signature: item?.signature || getProgramSignature(normalized),
+        importedAt: item?.importedAt || null,
+        program: normalized,
+      }
+    })
+    .filter(Boolean)
+
+  return [builtIn, ...imported]
+}
 
 function isValidProgress(data, progress) {
   if (!progress) {
@@ -81,7 +159,9 @@ async function fetchProgressFromSupabase(userId) {
 
 export const useWorkoutStore = create((set, get) => ({
   // Program data
-  program: program,
+  program: defaultProgram,
+  programLibrary: buildProgramLibrary([]),
+  activeProgramId: BUILT_IN_PROGRAM_ID,
 
   // Current position
   currentPhaseId: 'phase_1',
@@ -111,6 +191,12 @@ export const useWorkoutStore = create((set, get) => ({
 
   // Initialize store from localStorage, then Supabase if authenticated
   initializeStore: async () => {
+    const savedImportedPrograms = storage.getImportedPrograms()
+    const savedActiveProgramId = storage.getActiveProgramId()
+    const programLibrary = buildProgramLibrary(savedImportedPrograms)
+    const activeProgramEntry = programLibrary.find((entry) => entry.id === savedActiveProgramId) || programLibrary[0]
+    const activeProgram = activeProgramEntry?.program || defaultProgram
+
     const savedStart = storage.getProgramStart()
     const savedProgress = storage.getProgress()
     const savedCompletedDays = storage.getCompletedDays()
@@ -123,23 +209,27 @@ export const useWorkoutStore = create((set, get) => ({
     const savedRestTimerVibration = storage.getRestTimerVibration()
     const savedDismissedAlerts = storage.getDismissedAlerts()
 
+    set({
+      program: activeProgram,
+      programLibrary,
+      activeProgramId: activeProgramEntry.id,
+    })
+
     // Load from localStorage first (fast)
     if (savedStart) {
       set({ programStart: savedStart })
     }
 
-    if (isValidProgress(program, savedProgress)) {
+    if (isValidProgress(activeProgram, savedProgress)) {
       set({
         currentPhaseId: savedProgress.currentPhaseId,
         currentWeek: savedProgress.currentWeek,
         currentDayIndex: savedProgress.currentDayIndex,
       })
     } else {
-      storage.saveProgress({
-        currentPhaseId: 'phase_1',
-        currentWeek: 1,
-        currentDayIndex: 0,
-      })
+      const fallbackProgress = getDefaultProgressForProgram(activeProgram)
+      storage.saveProgress(fallbackProgress)
+      set(fallbackProgress)
     }
 
     if (savedCompletedDays) {
@@ -150,9 +240,7 @@ export const useWorkoutStore = create((set, get) => ({
       set({ bodyweightLogs: savedBodyweight })
     }
 
-    if (savedPlanDisplayName) {
-      set({ planDisplayName: savedPlanDisplayName })
-    }
+    set({ planDisplayName: savedPlanDisplayName || activeProgramEntry.name || 'Dina Workout plan' })
     
     if (savedCustomizations) {
       set({ programCustomizations: savedCustomizations })
@@ -187,7 +275,7 @@ export const useWorkoutStore = create((set, get) => ({
           currentDayIndex: remoteProgress.current_day_index,
         }
 
-        if (isValidProgress(program, cloudProgress)) {
+        if (isValidProgress(activeProgram, cloudProgress)) {
           storage.saveProgress(cloudProgress)
           set(cloudProgress)
         }
@@ -248,6 +336,109 @@ export const useWorkoutStore = create((set, get) => ({
     const normalized = String(name || '').trim() || 'Dina Workout plan'
     storage.savePlanDisplayName(normalized)
     set({ planDisplayName: normalized })
+  },
+
+  switchWorkoutPlan: async (programId) => {
+    const state = get()
+    const target = state.programLibrary.find((entry) => entry.id === programId)
+    if (!target) {
+      return { ok: false, error: 'Workout plan not found.' }
+    }
+
+    const nextProgress = isValidProgress(target.program, storage.getProgress())
+      ? storage.getProgress()
+      : getDefaultProgressForProgram(target.program)
+
+    storage.saveActiveProgramId(target.id)
+    storage.saveProgress(nextProgress)
+    storage.savePlanDisplayName(target.name)
+    storage.saveProgramCustomizations({})
+    storage.saveScheduledExercises([])
+
+    set({
+      program: target.program,
+      activeProgramId: target.id,
+      currentPhaseId: nextProgress.currentPhaseId,
+      currentWeek: nextProgress.currentWeek,
+      currentDayIndex: nextProgress.currentDayIndex,
+      activeCustomTemplate: null,
+      planDisplayName: target.name,
+      programCustomizations: {},
+      scheduledExercises: [],
+    })
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      set({ syncStatus: 'syncing' })
+      const latest = get()
+      const res = await syncProgressToSupabase(session.user.id, nextProgress, latest.programStart, {
+        weightUnit: latest.weightUnit,
+        restTimerDefault: latest.restTimerDefault,
+        dismissedAlerts: latest.dismissedAlerts,
+      })
+      set({ syncStatus: res.offline ? 'offline' : (res.error ? 'error' : 'saved') })
+    }
+
+    return { ok: true, name: target.name }
+  },
+
+  importWorkoutPlan: async (payload, providedName = 'Imported Plan') => {
+    const normalized = normalizeProgramData(payload)
+    if (!normalized) {
+      return { ok: false, error: 'Invalid plan format. JSON must include phases[] with weeks and days.' }
+    }
+
+    const signature = getProgramSignature(normalized)
+    const state = get()
+    const existing = state.programLibrary.find((entry) => entry.signature === signature)
+    if (existing) {
+      return { ok: true, duplicate: true, name: existing.name, programId: existing.id }
+    }
+
+    const baseName = String(payload?.name || providedName || 'Imported Plan')
+      .replace(/\.json$/i, '')
+      .trim() || 'Imported Plan'
+
+    const existingNames = new Set(state.programLibrary.map((entry) => entry.name))
+    let finalName = baseName
+    let suffix = 2
+    while (existingNames.has(finalName)) {
+      finalName = `${baseName} (${suffix})`
+      suffix += 1
+    }
+
+    const newEntry = {
+      id: `imported_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      name: finalName,
+      source: 'imported',
+      signature,
+      importedAt: new Date().toISOString(),
+      program: normalized,
+    }
+
+    const nextLibrary = [...state.programLibrary, newEntry]
+    const importedOnly = nextLibrary
+      .filter((entry) => entry.source === 'imported')
+      .map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        source: entry.source,
+        signature: entry.signature,
+        importedAt: entry.importedAt,
+        program: entry.program,
+      }))
+
+    storage.saveImportedPrograms(importedOnly)
+    set({ programLibrary: nextLibrary })
+
+    await get().switchWorkoutPlan(newEntry.id)
+
+    return {
+      ok: true,
+      duplicate: false,
+      name: newEntry.name,
+      programId: newEntry.id,
+    }
   },
 
   scheduleExerciseForDay: (payload) => {
@@ -792,10 +983,15 @@ export const useWorkoutStore = create((set, get) => ({
   // Reset everything
   resetProgram: async () => {
     storage.clearAll()
+    const baseLibrary = buildProgramLibrary([])
+    const baseProgress = getDefaultProgressForProgram(defaultProgram)
     set({
-      currentPhaseId: 'phase_1',
-      currentWeek: 1,
-      currentDayIndex: 0,
+      program: defaultProgram,
+      programLibrary: baseLibrary,
+      activeProgramId: BUILT_IN_PROGRAM_ID,
+      currentPhaseId: baseProgress.currentPhaseId,
+      currentWeek: baseProgress.currentWeek,
+      currentDayIndex: baseProgress.currentDayIndex,
       programStart: null,
       completedDays: [],
       activeCustomTemplate: null,

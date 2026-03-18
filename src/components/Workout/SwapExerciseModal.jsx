@@ -1,12 +1,29 @@
 import React, { useState, useMemo } from 'react'
 import MuscleGroupBadge from '../MuscleGroupBadge'
-import { ALL_PROGRAM_EXERCISES } from '../../utils/workoutHelpers'
+import { useWorkoutStore } from '../../store/useWorkoutStore'
 
 export function SwapExerciseModal({ exercise, onSwap, onClose }) {
+  const program = useWorkoutStore((state) => state.program)
   const [activeTab, setActiveTab] = useState('subs')
   const [searchQuery, setSearchQuery] = useState('')
 
-  const findByName = (name) => ALL_PROGRAM_EXERCISES.find((item) => item.name === name)
+  const allProgramExercises = useMemo(() => {
+    const map = new Map()
+    ;(program?.phases || []).forEach((phase) => {
+      ;(phase.weeks || []).forEach((week) => {
+        ;(week.days || []).forEach((day) => {
+          ;(day.exercises || []).forEach((item) => {
+            if (!map.has(item.name)) {
+              map.set(item.name, item)
+            }
+          })
+        })
+      })
+    })
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
+  }, [program])
+
+  const findByName = (name) => allProgramExercises.find((item) => item.name === name)
 
   const directSubstitutes = useMemo(() => {
     return [exercise.sub1, exercise.sub2]
@@ -17,22 +34,22 @@ export function SwapExerciseModal({ exercise, onSwap, onClose }) {
 
   const sameMuscleSuggestions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    return ALL_PROGRAM_EXERCISES.filter((item) => {
+    return allProgramExercises.filter((item) => {
       if (item.id === exercise.id) return false
       if (item.muscleGroup !== exercise.muscleGroup) return false
       if (!query) return true
       return item.name.toLowerCase().includes(query)
     }).slice(0, 30)
-  }, [exercise.id, exercise.muscleGroup, searchQuery])
+  }, [allProgramExercises, exercise.id, exercise.muscleGroup, searchQuery])
 
   const allSearchSuggestions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    return ALL_PROGRAM_EXERCISES.filter((item) => {
+    return allProgramExercises.filter((item) => {
       if (item.id === exercise.id) return false
       if (!query) return true
       return item.name.toLowerCase().includes(query)
     }).slice(0, 40)
-  }, [exercise.id, searchQuery])
+  }, [allProgramExercises, exercise.id, searchQuery])
 
   const handleSelect = (ex, isPermanent) => {
     onSwap({ ...ex }, isPermanent)

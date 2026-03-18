@@ -5,7 +5,6 @@ import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import { MUSCLE_GROUPS, getMuscleGroupColor } from '../utils/muscleGroups'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import { analyzeRPETrend } from '../utils/rpeTrendAnalysis'
-import program from '../data/program.json'
 
 const MG_OVERRIDES_KEY = 'ppl_muscle_group_overrides'
 
@@ -20,10 +19,10 @@ function saveOverrides(overrides) {
   localStorage.setItem(MG_OVERRIDES_KEY, JSON.stringify(overrides))
 }
 
-// Extract all Dina Workout plan exercises (deduplicated by name) with override support
-function getJeffExercises(overrides) {
+// Extract all active plan exercises (deduplicated by name) with override support
+function getJeffExercises(programData, overrides) {
   const map = new Map()
-  program.phases.forEach(phase => {
+  ;(programData?.phases || []).forEach(phase => {
     phase.weeks.forEach(week => {
       week.days.forEach(day => {
         day.exercises.forEach(ex => {
@@ -193,6 +192,7 @@ function ExerciseFormModal({ exercise, onSave, onClose }) {
 // ── Main Page ──
 function ExercisesPage() {
   const { user } = useAuth()
+  const program = useWorkoutStore((state) => state.program)
   const completedDays = useWorkoutStore((state) => state.completedDays)
   const planDisplayName = useWorkoutStore((state) => state.planDisplayName)
   const [activeTab, setActiveTab] = useState('program')
@@ -212,7 +212,7 @@ function ExercisesPage() {
   const [detailIsCustom, setDetailIsCustom] = useState(false)
 
   // Refresh exercises when overrides change
-  const jeffExercises = useMemo(() => getJeffExercises(overrides), [overrides])
+  const jeffExercises = useMemo(() => getJeffExercises(program, overrides), [program, overrides])
 
   useEffect(() => {
     if (user) fetchCustomExercises()

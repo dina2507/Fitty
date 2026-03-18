@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../components/AuthProvider'
 import { useWorkoutStore } from '../store/useWorkoutStore'
-import program from '../data/program.json'
 
 function ProgramPage() {
   const { user } = useAuth()
@@ -13,6 +12,7 @@ function ProgramPage() {
   
   const loadCustomWorkoutTemplate = useWorkoutStore(state => state.loadCustomWorkoutTemplate)
   const planDisplayName = useWorkoutStore(state => state.planDisplayName)
+  const program = useWorkoutStore(state => state.program)
   const navigate = useNavigate()
 
   useEffect(() => {

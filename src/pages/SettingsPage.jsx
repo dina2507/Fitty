@@ -21,6 +21,10 @@ function SettingsPage() {
   const resetProgram = useWorkoutStore((state) => state.resetProgram)
   const setProgramStart = useWorkoutStore((state) => state.setProgramStart)
   const jumpToDay = useWorkoutStore((state) => state.jumpToDay)
+  const importWorkoutPlan = useWorkoutStore((state) => state.importWorkoutPlan)
+  const switchWorkoutPlan = useWorkoutStore((state) => state.switchWorkoutPlan)
+  const programLibrary = useWorkoutStore((state) => state.programLibrary)
+  const activeProgramId = useWorkoutStore((state) => state.activeProgramId)
   const program = useWorkoutStore((state) => state.program)
   const planDisplayName = useWorkoutStore((state) => state.planDisplayName)
   const setPlanDisplayName = useWorkoutStore((state) => state.setPlanDisplayName)
@@ -42,6 +46,8 @@ function SettingsPage() {
   const [isSavingPrefs, setIsSavingPrefs] = useState(false)
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [isUpdatingProgramPosition, setIsUpdatingProgramPosition] = useState(false)
+  const [isSwitchingProgram, setIsSwitchingProgram] = useState(false)
+  const [isImportingProgram, setIsImportingProgram] = useState(false)
   const [isExportingAllCsv, setIsExportingAllCsv] = useState(false)
   const [isExportingCsv, setIsExportingCsv] = useState(false)
   const [isExportingMonthlyPdf, setIsExportingMonthlyPdf] = useState(false)
@@ -292,6 +298,54 @@ function SettingsPage() {
     }
   }
 
+  const onSwitchWorkoutPlan = async (programId) => {
+    if (!programId || programId === activeProgramId || isSwitchingProgram) return
+
+    setIsSwitchingProgram(true)
+    try {
+      const result = await switchWorkoutPlan(programId)
+      if (result?.ok) {
+        setStatus(`Switched to ${result.name}.`)
+      } else {
+        setStatus(result?.error || 'Could not switch workout plan.')
+      }
+    } catch (error) {
+      console.error('Failed to switch workout plan:', error)
+      setStatus('Could not switch workout plan.')
+    } finally {
+      setIsSwitchingProgram(false)
+    }
+  }
+
+  const onImportWorkoutPlanFile = async (event) => {
+    const file = event?.target?.files?.[0]
+    if (!file || isImportingProgram) return
+
+    setIsImportingProgram(true)
+    try {
+      const content = await file.text()
+      const parsed = JSON.parse(content)
+      const fallbackName = file.name.replace(/\.json$/i, '').trim() || 'Imported Plan'
+      const result = await importWorkoutPlan(parsed, fallbackName)
+
+      if (!result?.ok) {
+        setStatus(result?.error || 'Workout plan import failed.')
+      } else if (result.duplicate) {
+        setStatus(`Plan already exists as ${result.name}. Reusing existing plan.`)
+      } else {
+        setStatus(`Imported new workout plan: ${result.name}.`)
+      }
+    } catch (error) {
+      console.error('Failed to import workout plan JSON:', error)
+      setStatus('Invalid JSON file. Please upload a valid workout plan file.')
+    } finally {
+      setIsImportingProgram(false)
+      if (event?.target) {
+        event.target.value = ''
+      }
+    }
+  }
+
   const onUnitChange = async (nextUnit) => {
     if (isSavingPrefs || nextUnit === weightUnit) return
     setIsSavingPrefs(true)
@@ -494,6 +548,42 @@ function SettingsPage() {
       {/* Program Settings */}
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Program Settings</h2>
+
+        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/50">
+          <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Workout Plan Manager</p>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            Import a full plan JSON and switch plans from one place. Duplicate plan files are skipped automatically.
+          </p>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
+            <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              Active Plan
+              <select
+                value={activeProgramId}
+                onChange={(event) => onSwitchWorkoutPlan(event.target.value)}
+                disabled={isSwitchingProgram}
+                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none ring-zinc-900 focus:ring disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+              >
+                {(programLibrary || []).map((entry) => (
+                  <option key={entry.id} value={entry.id}>{entry.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="flex items-end">
+              <label className="cursor-pointer rounded-full border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800">
+                {isImportingProgram ? 'Importing...' : 'Import Plan JSON'}
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={onImportWorkoutPlanFile}
+                  disabled={isImportingProgram}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
 
         <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/50">
           <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Plan Name</p>

@@ -4,6 +4,8 @@ const STORAGE_KEYS = {
   PROGRAM_START: 'ppl_tracker_program_start',
   BODYWEIGHT_LOGS: 'ppl_tracker_bodyweight_logs',
   PLAN_DISPLAY_NAME: 'ppl_tracker_plan_display_name',
+  IMPORTED_PROGRAMS: 'ppl_tracker_imported_programs',
+  ACTIVE_PROGRAM_ID: 'ppl_tracker_active_program_id',
   PROGRAM_CUSTOMIZATIONS: 'ppl_tracker_program_customizations',
   SCHEDULED_EXERCISES: 'ppl_tracker_scheduled_exercises',
   WEIGHT_UNIT: 'ppl_tracker_weight_unit',
@@ -56,6 +58,32 @@ export const storage = {
   savePlanDisplayName(name) {
     const normalized = String(name || '').trim() || 'Dina Workout plan'
     localStorage.setItem(STORAGE_KEYS.PLAN_DISPLAY_NAME, normalized)
+  },
+
+  getImportedPrograms() {
+    const data = localStorage.getItem(STORAGE_KEYS.IMPORTED_PROGRAMS)
+    if (!data) return []
+    try {
+      const parsed = JSON.parse(data)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  },
+
+  saveImportedPrograms(programs) {
+    localStorage.setItem(
+      STORAGE_KEYS.IMPORTED_PROGRAMS,
+      JSON.stringify(Array.isArray(programs) ? programs : []),
+    )
+  },
+
+  getActiveProgramId() {
+    return localStorage.getItem(STORAGE_KEYS.ACTIVE_PROGRAM_ID) || 'built_in_default_program'
+  },
+
+  saveActiveProgramId(programId) {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PROGRAM_ID, String(programId || 'built_in_default_program'))
   },
 
   getProgramCustomizations() {
@@ -139,6 +167,8 @@ export const storage = {
       programStart: this.getProgramStart(),
       bodyweightLogs: this.getBodyweightLogs(),
       planDisplayName: this.getPlanDisplayName(),
+      importedPrograms: this.getImportedPrograms(),
+      activeProgramId: this.getActiveProgramId(),
       programCustomizations: this.getProgramCustomizations(),
       scheduledExercises: this.getScheduledExercises(),
       weightUnit: this.getWeightUnit(),
@@ -154,6 +184,8 @@ export const storage = {
     if (data.programStart) this.saveProgramStart(data.programStart)
     if (data.bodyweightLogs) this.saveBodyweightLogs(data.bodyweightLogs)
     if (data.planDisplayName) this.savePlanDisplayName(data.planDisplayName)
+    if (Array.isArray(data.importedPrograms)) this.saveImportedPrograms(data.importedPrograms)
+    if (data.activeProgramId) this.saveActiveProgramId(data.activeProgramId)
     if (data.programCustomizations) this.saveProgramCustomizations(data.programCustomizations)
     if (Array.isArray(data.scheduledExercises)) this.saveScheduledExercises(data.scheduledExercises)
     if (data.weightUnit) this.saveWeightUnit(data.weightUnit)

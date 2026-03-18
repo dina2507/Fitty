@@ -3,10 +3,12 @@ import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../AuthProvider'
 import MuscleGroupBadge from '../MuscleGroupBadge'
 import { MUSCLE_GROUPS } from '../../utils/muscleGroups'
-import { ALL_PROGRAM_EXERCISES, generateId } from '../../utils/workoutHelpers'
+import { generateId } from '../../utils/workoutHelpers'
+import { useWorkoutStore } from '../../store/useWorkoutStore'
 
 export function AddExerciseModal({ onAdd, onClose, activeIds }) {
   const { user } = useAuth()
+  const program = useWorkoutStore((state) => state.program)
   const [searchQuery, setSearchQuery] = useState('')
   const [tab, setTab] = useState('program') // program | custom | create
   const [customExercises, setCustomExercises] = useState([])
@@ -19,6 +21,23 @@ export function AddExerciseModal({ onAdd, onClose, activeIds }) {
   const [newReps, setNewReps] = useState('8-10')
   const [newRpe, setNewRpe] = useState('8-9')
   const [newRest, setNewRest] = useState('~2 min')
+
+  const allProgramExercises = useMemo(() => {
+    const map = new Map()
+    ;(program?.phases || []).forEach((phase) => {
+      ;(phase.weeks || []).forEach((week) => {
+        ;(week.days || []).forEach((day) => {
+          ;(day.exercises || []).forEach((exercise) => {
+            if (!map.has(exercise.name)) {
+              map.set(exercise.name, exercise)
+            }
+          })
+        })
+      })
+    })
+
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
+  }, [program])
 
   useEffect(() => {
     if (user) fetchCustomExercises()
@@ -36,12 +55,12 @@ export function AddExerciseModal({ onAdd, onClose, activeIds }) {
   }
 
   const filteredProgram = useMemo(() => {
-    return ALL_PROGRAM_EXERCISES.filter(ex => {
+    return allProgramExercises.filter(ex => {
       if (activeIds.has(ex.id)) return false
       if (!searchQuery) return true
       return ex.name.toLowerCase().includes(searchQuery.toLowerCase())
     })
-  }, [searchQuery, activeIds])
+  }, [allProgramExercises, searchQuery, activeIds])
 
   const filteredCustom = useMemo(() => {
     return customExercises.filter(ex => {

@@ -80,6 +80,7 @@ function WorkoutPage() {
   const [isSavingWorkout, setIsSavingWorkout] = useState(false)
   const [startTime, setStartTime] = useState(() => Date.now())
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [activeWorkoutTab, setActiveWorkoutTab] = useState('workout')
   const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false)
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState([])
 
@@ -175,6 +176,20 @@ function WorkoutPage() {
     return getScheduledExercisesForDay(currentPhaseId, currentWeek, programDay.dayIndex)
   }, [activeCustomTemplate, currentPhaseId, currentWeek, getScheduledExercisesForDay, programDay])
 
+  const recommendedExercises = useMemo(() => {
+    if (!scheduledForCurrentDay.length) return []
+    const activeOriginalIds = new Set(
+      activeExercises.map((exercise) => exercise.originalExerciseId || exercise.id),
+    )
+
+    return scheduledForCurrentDay.filter((exercise) => {
+      const sourceId = exercise.originalExerciseId || exercise.id
+      return !activeOriginalIds.has(sourceId)
+    })
+  }, [activeExercises, scheduledForCurrentDay])
+
+  const hasRecommendedTab = Boolean(!activeCustomTemplate && !programDay?.isRest && scheduledForCurrentDay.length)
+
   useEffect(() => {
     setPickerWeekNumber(String(currentWeek))
     setScheduleWeekNumber(String(currentWeek))
@@ -201,6 +216,12 @@ function WorkoutPage() {
       setScheduleDayIndex(String(scheduleDayOptions[0].dayIndex))
     }
   }, [scheduleDayIndex, scheduleDayOptions])
+
+  useEffect(() => {
+    if (!hasRecommendedTab && activeWorkoutTab === 'recommended') {
+      setActiveWorkoutTab('workout')
+    }
+  }, [activeWorkoutTab, hasRecommendedTab])
 
   // Initialize from Custom Template OR program day OR restored auto-save
   useEffect(() => {
@@ -269,13 +290,12 @@ function WorkoutPage() {
         setStartTime(Date.now())
       }
     } else if (programDay?.exercises && !activeCustomTemplate) {
-      const merged = [...programDay.exercises, ...scheduledForCurrentDay]
-      setActiveExercises(merged)
-      setExerciseLog(buildInitialLog(merged))
+      setActiveExercises([...programDay.exercises])
+      setExerciseLog(buildInitialLog(programDay.exercises))
       setSessionNotes('')
       setStartTime(Date.now())
     }
-  }, [currentPhaseId, currentWeek, programDay?.dayIndex, activeCustomTemplate, todaysWorkout, programDay, scheduledForCurrentDay])
+  }, [currentPhaseId, currentWeek, programDay?.dayIndex, activeCustomTemplate, todaysWorkout, programDay])
 
   // Auto-prefill blank weight inputs from previous session values.
   useEffect(() => {
@@ -583,6 +603,82 @@ function WorkoutPage() {
     setExerciseToSchedule(null)
   }, [currentPhase, currentPhaseId, currentWeek, exerciseToSchedule, programDay, removeExercise, scheduleDayIndex, scheduleExerciseForDay, scheduleWeekNumber])
 
+  const appendRecommendedExercises = useCallback((items) => {
+    if (!Array.isArray(items) || items.length === 0) return 0
+
+    const addedExercises = []
+
+    setActiveExercises((prev) => {
+      const next = [...prev]
+      const existingOriginalIds = new Set(prev.map((exercise) => exercise.originalExerciseId || exercise.id))
+
+      items.forEach((item) => {
+        const sourceId = item.originalExerciseId || item.id
+        if (existingOriginalIds.has(sourceId)) return
+
+        existingOriginalIds.add(sourceId)
+        const sessionId = `recommended_${item.scheduledTransferId || sourceId}`
+        const exerciseToAdd = {
+          ...item,
+          id: sessionId,
+          originalExerciseId: sourceId,
+        }
+
+        next.push(exerciseToAdd)
+        addedExercises.push(exerciseToAdd)
+      })
+
+      return next
+    })
+
+    if (addedExercises.length > 0) {
+      setExerciseLog((prev) => {
+        const next = { ...prev }
+
+        addedExercises.forEach((exercise) => {
+          if (next[exercise.id]) return
+
+          const numSets = exercise.workingSets || exercise.default_sets || 1
+          next[exercise.id] = {
+            sets: Array.from({ length: numSets }, (_, index) => ({
+              setNumber: index + 1,
+              weight: '',
+              reps: '',
+              rpe: '',
+            })),
+            notes: '',
+          }
+        })
+
+        return next
+      })
+    }
+
+    return addedExercises.length
+  }, [])
+
+  const addRecommendedExercise = useCallback((exercise) => {
+    const addedCount = appendRecommendedExercises([exercise])
+    if (addedCount > 0) {
+      setSessionNotice(`${exercise.name} added from recommendations.`)
+      setActiveWorkoutTab('workout')
+      return
+    }
+
+    setSessionNotice(`${exercise.name} is already in today's workout.`)
+  }, [appendRecommendedExercises])
+
+  const addAllRecommendedExercises = useCallback(() => {
+    const addedCount = appendRecommendedExercises(recommendedExercises)
+    if (addedCount > 0) {
+      setSessionNotice(`${addedCount} recommended exercise${addedCount === 1 ? '' : 's'} added to today's workout.`)
+      setActiveWorkoutTab('workout')
+      return
+    }
+
+    setSessionNotice('All recommended exercises are already in your workout.')
+  }, [appendRecommendedExercises, recommendedExercises])
+
   // ── Move exercise up/down ──
   const moveExercise = useCallback((index, direction) => {
     setActiveExercises((prev) => {
@@ -685,11 +781,17 @@ function WorkoutPage() {
 
   // ── Cancel/Discard Workout ──
   const onCancelCustom = () => {
+    if (activeCustomTemplate?.templateSource === 'program') {
+      localStorage.removeItem(AUTOSAVE_KEY)
+      clearCustomWorkoutTemplate()
+      setSessionNotice('Back to your default day workout.')
+      return
+    }
+
     if (window.confirm('Discard this workout override/session?')) {
       localStorage.removeItem(AUTOSAVE_KEY)
-      const wasProgramTemplate = activeCustomTemplate?.templateSource === 'program'
       clearCustomWorkoutTemplate()
-      navigate(wasProgramTemplate ? '/workout' : '/program')
+      navigate('/program')
     }
   }
 
@@ -879,8 +981,75 @@ function WorkoutPage() {
             />
           )}
 
+          {hasRecommendedTab && (
+            <section className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
+              <div className="flex gap-1 rounded-lg bg-zinc-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveWorkoutTab('workout')}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    activeWorkoutTab === 'workout'
+                      ? 'bg-white text-zinc-900 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-800'
+                  }`}
+                >
+                  Workout
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveWorkoutTab('recommended')}
+                  className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    activeWorkoutTab === 'recommended'
+                      ? 'bg-white text-zinc-900 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-800'
+                  }`}
+                >
+                  Recommended ({recommendedExercises.length})
+                </button>
+              </div>
+
+              {activeWorkoutTab === 'recommended' && (
+                <div className="mt-3 grid gap-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-zinc-500">Exercises you moved to this day.</p>
+                    <button
+                      type="button"
+                      onClick={addAllRecommendedExercises}
+                      disabled={recommendedExercises.length === 0}
+                      className="rounded-full border border-zinc-300 px-3 py-1 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-40"
+                    >
+                      Add All
+                    </button>
+                  </div>
+
+                  {recommendedExercises.length === 0 && (
+                    <p className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
+                      No pending recommendations. Everything is already in your workout.
+                    </p>
+                  )}
+
+                  {recommendedExercises.map((exercise) => (
+                    <div key={exercise.scheduledTransferId || exercise.id} className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                      <div>
+                        <p className="text-sm font-medium text-zinc-900">{exercise.name}</p>
+                        <p className="text-[11px] text-zinc-500">{exercise.workingSets || '?'} sets × {exercise.reps || '?'}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => addRecommendedExercise(exercise)}
+                        className="rounded-full bg-zinc-900 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-zinc-700"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Exercise Cards */}
-          {activeExercises.map((exercise, exIndex) => (
+          {activeWorkoutTab === 'workout' && activeExercises.map((exercise, exIndex) => (
             <ExerciseCard
               key={exercise.id}
               exercise={exercise}
@@ -910,7 +1079,7 @@ function WorkoutPage() {
             />
           ))}
 
-          {activeExercises.length === 0 && (
+          {activeWorkoutTab === 'workout' && activeExercises.length === 0 && (
             <div className="rounded-xl border border-dashed border-zinc-300 bg-white p-8 text-center">
               <p className="text-sm text-zinc-500">No exercises yet. Tap "+ Add Exercise" to get started.</p>
             </div>

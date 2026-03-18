@@ -7,7 +7,6 @@ import { useAuth } from '../components/AuthProvider'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import { MUSCLE_GROUPS } from '../utils/muscleGroups'
-import program from '../data/program.json'
 
 // Generate a random ID for custom superset groups
 function generateId() {
@@ -33,24 +32,32 @@ function ensureUniqueExerciseIds(exercises = []) {
   })
 }
 
-// Flat list of all Dina Workout plan exercises
-const ALL_PROGRAM_EXERCISES = (() => {
-  const map = new Map()
-  program.phases.forEach(phase => phase.weeks.forEach(week => week.days.forEach(day => day.exercises.forEach(ex => {
-    if (!map.has(ex.name)) map.set(ex.name, ex)
-  }))))
-  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
-})()
-
 // ── Exercise Library Modal ──
 function ExercisePickerModal({ onAdd, onClose, excludeIds }) {
   const { user } = useAuth()
+  const program = useWorkoutStore((state) => state.program)
   const planDisplayName = useWorkoutStore((state) => state.planDisplayName)
   const [tab, setTab] = useState('program')
   const [search, setSearch] = useState('')
   const [muscleFilter, setMuscleFilter] = useState('All')
   const [customExercises, setCustomExercises] = useState([])
   const [loading, setLoading] = useState(false)
+
+  const allProgramExercises = useMemo(() => {
+    const map = new Map()
+    ;(program?.phases || []).forEach((phase) => {
+      ;(phase.weeks || []).forEach((week) => {
+        ;(week.days || []).forEach((day) => {
+          ;(day.exercises || []).forEach((exercise) => {
+            if (!map.has(exercise.name)) {
+              map.set(exercise.name, exercise)
+            }
+          })
+        })
+      })
+    })
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
+  }, [program])
 
   useEffect(() => {
     if (user && tab === 'custom') fetchCustom()
@@ -73,13 +80,13 @@ function ExercisePickerModal({ onAdd, onClose, excludeIds }) {
   }
 
   const filteredProgram = useMemo(() => {
-    return ALL_PROGRAM_EXERCISES.filter(ex => {
+    return allProgramExercises.filter(ex => {
       if (excludeIds.has(ex.id)) return false
       const matchSearch = !search || ex.name.toLowerCase().includes(search.toLowerCase())
       const matchMuscle = muscleFilter === 'All' || ex.muscleGroup === muscleFilter
       return matchSearch && matchMuscle
     })
-  }, [search, muscleFilter, excludeIds])
+  }, [allProgramExercises, search, muscleFilter, excludeIds])
 
   const filteredCustom = useMemo(() => {
     return customExercises.filter(ex => {
