@@ -1,20 +1,15 @@
 import { NavLink } from 'react-router-dom'
 import { useWorkoutStore } from '../store/useWorkoutStore'
-import { useAuth } from './AuthProvider'
-import SyncIndicator from './SyncIndicator'
 
 function Header() {
   const currentPhaseId = useWorkoutStore((state) => state.currentPhaseId)
   const currentWeek = useWorkoutStore((state) => state.currentWeek)
-  const { session } = useAuth()
 
   const navClass = ({ isActive }) =>
     [
       'rounded-full px-3 py-1.5 text-sm font-medium transition-colors',
       isActive ? 'bg-zinc-900 text-white' : 'text-zinc-700 hover:bg-zinc-200',
     ].join(' ')
-
-  if (!session) return null
 
   return (
     <header className="sticky top-0 z-20 border-b border-zinc-200 bg-white/90 backdrop-blur">
@@ -28,7 +23,6 @@ function Header() {
             </p>
           </div>
           <div className="flex items-center gap-2 md:hidden">
-            <SyncIndicator />
             <NavLink
               to="/settings"
               className="rounded-full p-2 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 transition-colors"
@@ -62,7 +56,6 @@ function Header() {
           </nav>
 
           <div className="hidden items-center gap-2 md:flex">
-            <SyncIndicator />
             <NavLink
               to="/settings"
               className="rounded-full p-2 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 transition-colors"

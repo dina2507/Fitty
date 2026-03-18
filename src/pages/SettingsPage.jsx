@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../components/AuthProvider'
 import DriveBackup from '../components/DriveBackup'
-import { supabase } from '../lib/supabaseClient'
 import { useWorkoutStore } from '../store/useWorkoutStore'
-import { flushSyncQueue, getSyncQueue } from '../utils/syncQueue'
 import {
   buildPRsCSV,
   buildWeeklyVolumeCSV,
@@ -15,9 +11,6 @@ import {
 import { generateMonthlyPDF } from '../utils/pdfExport'
 
 function SettingsPage() {
-  const navigate = useNavigate()
-  const { user } = useAuth()
-
   const exportData = useWorkoutStore((state) => state.exportData)
   const importData = useWorkoutStore((state) => state.importData)
   const resetProgram = useWorkoutStore((state) => state.resetProgram)
@@ -36,13 +29,11 @@ function SettingsPage() {
   const restTimerVibration = useWorkoutStore((state) => state.restTimerVibration)
   const setRestTimerVibration = useWorkoutStore((state) => state.setRestTimerVibration)
   const completedDays = useWorkoutStore((state) => state.completedDays)
-  const syncStatus = useWorkoutStore((state) => state.syncStatus)
 
   const [backupText, setBackupText] = useState('')
   const [status, setStatus] = useState('')
   const [restDefaultInput, setRestDefaultInput] = useState(String(restTimerDefault))
   const [isSavingPrefs, setIsSavingPrefs] = useState(false)
-  const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [isSwitchingProgram, setIsSwitchingProgram] = useState(false)
   const [isImportingProgram, setIsImportingProgram] = useState(false)
   const [isExportingAllCsv, setIsExportingAllCsv] = useState(false)
@@ -50,7 +41,6 @@ function SettingsPage() {
   const [isExportingMonthlyPdf, setIsExportingMonthlyPdf] = useState(false)
   const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [planNameInput, setPlanNameInput] = useState(planDisplayName)
-  const [pendingSyncCount, setPendingSyncCount] = useState(() => getSyncQueue().length)
 
   const formattedStartDate = useMemo(() => {
     if (!programStart) return ''
@@ -83,30 +73,6 @@ function SettingsPage() {
   useEffect(() => {
     setRestDefaultInput(String(restTimerDefault))
   }, [restTimerDefault])
-
-  useEffect(() => {
-    const refresh = () => {
-      setPendingSyncCount(getSyncQueue().length)
-    }
-
-    refresh()
-
-    const onStorage = (event) => {
-      if (!event?.key || event.key === 'fitty_offline_sync_queue') {
-        refresh()
-      }
-    }
-
-    window.addEventListener('storage', onStorage)
-    window.addEventListener('online', refresh)
-    window.addEventListener('focus', refresh)
-
-    return () => {
-      window.removeEventListener('storage', onStorage)
-      window.removeEventListener('online', refresh)
-      window.removeEventListener('focus', refresh)
-    }
-  }, [])
 
   const onExport = () => {
     const payload = exportData()
@@ -201,7 +167,7 @@ function SettingsPage() {
 
     setIsExportingMonthlyPdf(true)
     try {
-      generateMonthlyPDF(selectedReportLogs, user?.email, month, year)
+      generateMonthlyPDF(selectedReportLogs, null, month, year)
       setStatus('Monthly PDF report downloaded.')
     } catch (error) {
       console.error('Failed to generate monthly PDF report:', error)
@@ -301,127 +267,14 @@ function SettingsPage() {
     setStatus('Training preferences saved.')
   }
 
-  const handleSettingsManualSync = async () => {
-    if (!navigator.onLine) {
-      setStatus('You are currently offline. Changes will sync automatically once you are back online.')
-      setPendingSyncCount(getSyncQueue().length)
-      return
-    }
-
-    useWorkoutStore.setState({ syncStatus: 'syncing' })
-
-    const cleared = await flushSyncQueue()
-    let remoteOk = true
-
-    if (navigator.onLine) {
-      const cloud = await useWorkoutStore.getState().syncFromCloud({ setSyncing: false })
-      remoteOk = Boolean(cloud?.ok || cloud?.offline)
-    }
-
-    const remaining = getSyncQueue().length
-    setPendingSyncCount(remaining)
-    useWorkoutStore.getState().recomputeSyncStatus({ cleared, remoteOk })
-
-    if (remaining === 0 && remoteOk) {
-      setStatus('All workouts are synced with the cloud.')
-    } else if (!navigator.onLine) {
-      setStatus('You went offline while syncing. Your changes are queued and will sync later.')
-    } else if (!remoteOk) {
-      setStatus('Some data could not be synced. You can retry from here or the header.')
-    }
-  }
-
-  const onLogout = async () => {
-    await supabase.auth.signOut()
-    navigate('/auth')
-  }
-
-  const onDeleteAccount = async () => {
-    if (!user?.id || isDeletingAccount) return
-
-    const confirmation = window.prompt('Type DELETE to permanently remove your account and data.')
-    if (confirmation !== 'DELETE') {
-      setStatus('Account deletion cancelled.')
-      return
-    }
-
-    setIsDeletingAccount(true)
-
-    try {
-      const tables = ['workout_logs', 'custom_exercises', 'custom_workouts', 'achievements', 'user_progress']
-
-      for (const table of tables) {
-        try {
-          const { error } = await supabase
-            .from(table)
-            .delete()
-            .eq('user_id', user.id)
-
-          if (error) {
-            console.error(`Failed deleting rows from ${table}:`, error)
-          }
-        } catch (tableError) {
-          console.error(`Delete failed for ${table}:`, tableError)
-        }
-      }
-
-      let authDeleted = false
-      try {
-        const { error: authDeleteError } = await supabase.auth.admin.deleteUser(user.id)
-        authDeleted = !authDeleteError
-        if (authDeleteError) {
-          console.error('Auth account deletion requires elevated permissions:', authDeleteError)
-        }
-      } catch (authError) {
-        console.error('Auth account deletion not available in this client context:', authError)
-      }
-
-      await resetProgram()
-      await supabase.auth.signOut()
-
-      if (authDeleted) {
-        setStatus('Account deleted successfully.')
-      } else {
-        setStatus('Training data deleted and you were signed out. Auth account deletion requires admin access.')
-      }
-
-      navigate('/auth')
-    } catch (error) {
-      console.error('Account deletion failed:', error)
-      setStatus('Something went wrong while deleting your account. Your local data is still safe.')
-    } finally {
-      setIsDeletingAccount(false)
-    }
-  }
-
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-6">
-      {/* Account Section */}
+      {/* Local Mode Status */}
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
-        <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Account</h2>
-        <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">Logged in as</p>
-            <p className="font-medium truncate text-zinc-900 dark:text-zinc-100">{user?.email || '—'}</p>
-          </div>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <button
-              type="button"
-              onClick={onLogout}
-              className="w-full sm:w-auto text-center rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
-            >
-              Logout
-            </button>
-            <button
-              type="button"
-              onClick={onDeleteAccount}
-              disabled={isDeletingAccount}
-              className="w-full sm:w-auto text-center rounded-full border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-            >
-              {isDeletingAccount ? 'Deleting...' : 'Delete Account'}
-            </button>
-          </div>
-        </div>
+        <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Local Mode</h2>
+        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+          Cloud sync and account features are temporarily disabled. All workouts are stored locally on this device.
+        </p>
       </section>
 
       {/* Training Preferences */}
@@ -589,36 +442,7 @@ function SettingsPage() {
         </label>
       </section>
 
-      {/* Cloud Sync Overview */}
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
-        <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Cloud Sync</h3>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-          Fitty saves everything locally first, then syncs changes to the cloud when you are online.
-        </p>
-
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-zinc-500">Current status</p>
-            <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-              {syncStatus === 'syncing' && 'Syncing in progress…'}
-              {syncStatus === 'saved' && 'All workouts are synced.'}
-              {syncStatus === 'offline' && 'Offline – changes will sync when you are back online.'}
-              {syncStatus === 'error' && 'Sync issue – you can retry syncing your changes.'}
-            </p>
-            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-              Pending changes in the queue: {pendingSyncCount}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleSettingsManualSync}
-            className="w-full rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 sm:w-auto dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            Sync Now
-          </button>
-        </div>
-      </section>
+      {/* Cloud Sync disabled for now */}
 
       {/* Backup & Data */}
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">

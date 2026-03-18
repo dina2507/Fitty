@@ -142,7 +142,7 @@ function DriveBackup() {
       setUiState(UI_STATE.RESTORING)
 
       const restoredData = await downloadBackupFromDrive(file.id, token)
-      storage.importData(restoredData)
+      storage.importData(restoredData, { replaceExisting: true })
       await initializeStore()
 
       const restoredAt = file.createdTime || new Date().toISOString()
@@ -252,7 +252,7 @@ function DriveBackup() {
         <div>
           <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Auto-backup after workout completion</p>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Saves a fresh Drive backup after successful workout sync.
+            Saves a fresh Drive backup after workout completion.
           </p>
         </div>
         <button

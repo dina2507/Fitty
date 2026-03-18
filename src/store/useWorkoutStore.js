@@ -8,6 +8,7 @@ import defaultProgram from '../data/program.json'
 
 const BUILT_IN_PROGRAM_ID = 'built_in_default_program'
 const LEGACY_PROGRESS_OPTIONAL_FIELDS = ['weight_unit', 'rest_timer_default', 'dismissed_alerts']
+const CLOUD_SYNC_ENABLED = false
 let cloudSyncPromise = null
 
 function isUserProgressColumnMismatch(error) {
@@ -429,8 +430,29 @@ function isValidProgress(data, progress) {
   return Boolean(week.days[progress.currentDayIndex])
 }
 
+function triggerAutoDriveBackup() {
+  const autoDriveBackup = localStorage.getItem('fitty_auto_drive_backup') === 'true'
+  if (!autoDriveBackup) return
+
+  import('../lib/googleDrive')
+    .then(({ uploadBackupToDrive, signInWithGoogle }) => {
+      signInWithGoogle()
+        .then((token) => uploadBackupToDrive(storage.exportData(), token))
+        .catch((error) => {
+          console.error('Auto Google Drive backup failed:', error)
+        })
+    })
+    .catch((error) => {
+      console.error('Failed to load Google Drive backup module:', error)
+    })
+}
+
 // Helper: upsert user_progress to Supabase
 async function syncProgressToSupabase(userId, progress, programStart, settings = {}) {
+  if (!CLOUD_SYNC_ENABLED) {
+    return { ok: true, disabled: true }
+  }
+
   const basePayload = {
     user_id: userId,
     current_phase_id: progress.currentPhaseId,
@@ -561,6 +583,10 @@ function buildWorkoutLogPayload(userId, day) {
 }
 
 async function upsertWorkoutLogToSupabase(payload) {
+  if (!CLOUD_SYNC_ENABLED) {
+    return { ok: true, disabled: true }
+  }
+
   try {
     if (!navigator.onLine) {
       enqueueMutation('workout_logs', 'upsert', payload)
@@ -660,6 +686,11 @@ export const useWorkoutStore = create((set, get) => ({
 
   // Central helper to keep syncStatus in sync with connectivity and queue state
   recomputeSyncStatus: ({ cleared = false, remoteOk = true } = {}) => {
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
     const pending = getSyncQueue().length
 
     if (!navigator.onLine) {
@@ -683,6 +714,11 @@ export const useWorkoutStore = create((set, get) => ({
   },
 
   syncFromCloud: async ({ setSyncing = true } = {}) => {
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return { ok: true, offline: false, disabled: true }
+    }
+
     if (cloudSyncPromise) {
       return cloudSyncPromise
     }
@@ -981,6 +1017,11 @@ export const useWorkoutStore = create((set, get) => ({
     storage.saveProgramStart(date)
     set({ programStart: date })
 
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
     // Sync to Supabase
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
@@ -1033,6 +1074,11 @@ export const useWorkoutStore = create((set, get) => ({
       programCustomizations: {},
       scheduledExercises: [],
     })
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return { ok: true, name: target.name }
+    }
 
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
@@ -1187,6 +1233,11 @@ export const useWorkoutStore = create((set, get) => ({
     storage.saveWeightUnit(normalized)
     set({ weightUnit: normalized })
 
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
       const state = get()
@@ -1210,6 +1261,11 @@ export const useWorkoutStore = create((set, get) => ({
       : 120
     storage.saveRestTimerDefault(normalized)
     set({ restTimerDefault: normalized })
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
 
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
@@ -1243,6 +1299,11 @@ export const useWorkoutStore = create((set, get) => ({
     storage.saveDismissedAlerts(nextDismissedAlerts)
     set({ dismissedAlerts: nextDismissedAlerts })
 
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
       set({ syncStatus: 'syncing' })
@@ -1263,6 +1324,11 @@ export const useWorkoutStore = create((set, get) => ({
     storage.saveDismissedAlerts([])
     const state = get()
     set({ dismissedAlerts: [] })
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
 
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
@@ -1399,6 +1465,11 @@ export const useWorkoutStore = create((set, get) => ({
     storage.saveCompletedDays(newCompletedDays)
     set({ completedDays: newCompletedDays })
 
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
       set({ syncStatus: 'syncing' })
@@ -1462,6 +1533,16 @@ export const useWorkoutStore = create((set, get) => ({
       set({ completedDays: newCompletedDays })
     }
 
+    triggerAutoDriveBackup()
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      if (metadata.clearScheduledForCurrentDay !== false) {
+        get().clearScheduledExercisesForDay(currentPhaseId, currentWeek, currentDayIndex)
+      }
+      return
+    }
+
     // Sync new progress to Supabase
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
@@ -1482,25 +1563,6 @@ export const useWorkoutStore = create((set, get) => ({
         restTimerDefault: state.restTimerDefault,
         dismissedAlerts: state.dismissedAlerts,
       })
-
-      const workoutWriteSucceeded = !workoutSync.offline && !workoutSync.error
-      if (workoutWriteSucceeded) {
-        // Auto-backup to Drive if the user has enabled it.
-        const autoDriveBackup = localStorage.getItem('fitty_auto_drive_backup') === 'true'
-        if (autoDriveBackup) {
-          import('../lib/googleDrive')
-            .then(({ uploadBackupToDrive, signInWithGoogle }) => {
-              signInWithGoogle()
-                .then((token) => uploadBackupToDrive(storage.exportData(), token))
-                .catch((error) => {
-                  console.error('Auto Google Drive backup failed:', error)
-                })
-            })
-            .catch((error) => {
-              console.error('Failed to load Google Drive backup module:', error)
-            })
-        }
-      }
 
       const isOffline = Boolean(workoutSync.offline || progressSync.offline)
       const hasError = Boolean(workoutSync.error || progressSync.error)
@@ -1531,6 +1593,11 @@ export const useWorkoutStore = create((set, get) => ({
     storage.saveProgress(newProgress)
     set(newProgress)
 
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
     // Sync to Supabase
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
@@ -1558,6 +1625,11 @@ export const useWorkoutStore = create((set, get) => ({
     }
     storage.saveProgress(newProgress)
     set(newProgress)
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
 
     // Sync to Supabase
     const { data: { session } } = await supabase.auth.getSession()
@@ -1619,6 +1691,11 @@ export const useWorkoutStore = create((set, get) => ({
     storage.saveBodyweightLogs(updated)
     set({ bodyweightLogs: updated })
 
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
     // Sync to Supabase
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
@@ -1652,6 +1729,11 @@ export const useWorkoutStore = create((set, get) => ({
     storage.saveBodyweightLogs(updated)
     set({ bodyweightLogs: updated })
 
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
       const dateSimple = target.date.split('T')[0]
@@ -1677,6 +1759,11 @@ export const useWorkoutStore = create((set, get) => ({
     }
     storage.saveProgramCustomizations(updated)
     set({ programCustomizations: updated })
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
 
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
@@ -1707,6 +1794,11 @@ export const useWorkoutStore = create((set, get) => ({
     delete updated[originalExId]
     storage.saveProgramCustomizations(updated)
     set({ programCustomizations: updated })
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
 
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
@@ -1760,6 +1852,10 @@ export const useWorkoutStore = create((set, get) => ({
       milestoneToastQueue: [],
       syncStatus: 'saved',
     })
+
+    if (!CLOUD_SYNC_ENABLED) {
+      return
+    }
 
     // Clear Supabase-backed training state so reset propagates across devices.
     const { data: { session } } = await supabase.auth.getSession()

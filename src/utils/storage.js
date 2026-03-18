@@ -178,20 +178,27 @@ export const storage = {
     }
   },
 
-  importData(data) {
-    if (data.progress) this.saveProgress(data.progress)
-    if (data.completedDays) this.saveCompletedDays(data.completedDays)
-    if (data.programStart) this.saveProgramStart(data.programStart)
-    if (data.bodyweightLogs) this.saveBodyweightLogs(data.bodyweightLogs)
-    if (data.planDisplayName) this.savePlanDisplayName(data.planDisplayName)
-    if (Array.isArray(data.importedPrograms)) this.saveImportedPrograms(data.importedPrograms)
-    if (data.activeProgramId) this.saveActiveProgramId(data.activeProgramId)
-    if (data.programCustomizations) this.saveProgramCustomizations(data.programCustomizations)
-    if (Array.isArray(data.scheduledExercises)) this.saveScheduledExercises(data.scheduledExercises)
-    if (data.weightUnit) this.saveWeightUnit(data.weightUnit)
-    if (data.restTimerDefault) this.saveRestTimerDefault(data.restTimerDefault)
-    if (typeof data.restTimerVibration === 'boolean') this.saveRestTimerVibration(data.restTimerVibration)
-    if (Array.isArray(data.dismissedAlerts)) this.saveDismissedAlerts(data.dismissedAlerts)
+  importData(data, options = {}) {
+    if (!data || typeof data !== 'object') return
+
+    const { replaceExisting = false } = options
+    if (replaceExisting) {
+      this.clearAll()
+    }
+
+    if ('progress' in data) this.saveProgress(data.progress || null)
+    if ('completedDays' in data) this.saveCompletedDays(Array.isArray(data.completedDays) ? data.completedDays : [])
+    if ('programStart' in data) this.saveProgramStart(data.programStart || '')
+    if ('bodyweightLogs' in data) this.saveBodyweightLogs(Array.isArray(data.bodyweightLogs) ? data.bodyweightLogs : [])
+    if ('planDisplayName' in data) this.savePlanDisplayName(data.planDisplayName || 'Dina Workout plan')
+    if ('importedPrograms' in data) this.saveImportedPrograms(Array.isArray(data.importedPrograms) ? data.importedPrograms : [])
+    if ('activeProgramId' in data) this.saveActiveProgramId(data.activeProgramId || 'built_in_default_program')
+    if ('programCustomizations' in data) this.saveProgramCustomizations(data.programCustomizations && typeof data.programCustomizations === 'object' ? data.programCustomizations : {})
+    if ('scheduledExercises' in data) this.saveScheduledExercises(Array.isArray(data.scheduledExercises) ? data.scheduledExercises : [])
+    if ('weightUnit' in data) this.saveWeightUnit(data.weightUnit || 'kg')
+    if ('restTimerDefault' in data) this.saveRestTimerDefault(data.restTimerDefault)
+    if ('restTimerVibration' in data && typeof data.restTimerVibration === 'boolean') this.saveRestTimerVibration(data.restTimerVibration)
+    if ('dismissedAlerts' in data) this.saveDismissedAlerts(Array.isArray(data.dismissedAlerts) ? data.dismissedAlerts : [])
   }
 }
 
