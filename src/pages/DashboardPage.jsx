@@ -26,6 +26,44 @@ function DashboardPage() {
   const [showSavedMsg, setShowSavedMsg] = useState(false)
   const [showCalendar, setShowCalendar] = useState(false)
 
+  const orderedProgramWeeks = useMemo(() => {
+    return (program?.phases || []).flatMap((phase) =>
+      (phase.weeks || []).map((week) => {
+        const firstTrainDay = (week.days || []).find((day) => !day.isRest)
+        const fallbackDay = (week.days || [])[0]
+
+        return {
+          phaseId: phase.id,
+          weekNumber: week.weekNumber,
+          dayIndex: Number.isFinite(Number(firstTrainDay?.dayIndex))
+            ? Number(firstTrainDay.dayIndex)
+            : (Number.isFinite(Number(fallbackDay?.dayIndex)) ? Number(fallbackDay.dayIndex) : 0),
+        }
+      }),
+    )
+  }, [program])
+
+  const activeWeekCursorIndex = useMemo(() => {
+    return orderedProgramWeeks.findIndex(
+      (item) => item.phaseId === currentPhaseId && Number(item.weekNumber) === Number(currentWeek),
+    )
+  }, [orderedProgramWeeks, currentPhaseId, currentWeek])
+
+  const canGoPrevWeek = activeWeekCursorIndex > 0
+  const canGoNextWeek = activeWeekCursorIndex >= 0 && activeWeekCursorIndex < orderedProgramWeeks.length - 1
+
+  const goToAdjacentWeek = async (direction) => {
+    if (!Number.isFinite(activeWeekCursorIndex) || activeWeekCursorIndex < 0) return
+
+    const targetIndex = activeWeekCursorIndex + direction
+    if (targetIndex < 0 || targetIndex >= orderedProgramWeeks.length) return
+
+    const target = orderedProgramWeeks[targetIndex]
+    if (!target) return
+
+    await jumpToDay(target.phaseId, target.weekNumber, target.dayIndex)
+  }
+
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], [])
   const todaysLog = useMemo(() => bodyweightLogs.find(l => l.date.startsWith(todayStr)), [bodyweightLogs, todayStr])
 
@@ -356,12 +394,37 @@ function DashboardPage() {
       )}
 
       <section>
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-900">Week {currentWeek} Plan</h2>
-            <p className="text-sm text-zinc-500">Tap any day to jump</p>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => goToAdjacentWeek(-1)}
+              disabled={!canGoPrevWeek}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 bg-white text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Go to previous week"
+              title="Previous week"
+            >
+              {'<'}
+            </button>
+
+            <div className="min-w-0">
+              <h2 className="truncate text-lg font-semibold text-zinc-900">Week {currentWeek} Plan</h2>
+              <p className="text-sm text-zinc-500">Tap any day to jump</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => goToAdjacentWeek(1)}
+              disabled={!canGoNextWeek}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-300 bg-white text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Go to next week"
+              title="Next week"
+            >
+              {'>'}
+            </button>
           </div>
-          <button 
+
+          <button
             onClick={() => setShowCalendar(true)}
             className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 shadow-sm"
           >

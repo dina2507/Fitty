@@ -21,17 +21,12 @@ function SettingsPage() {
   const importData = useWorkoutStore((state) => state.importData)
   const resetProgram = useWorkoutStore((state) => state.resetProgram)
   const setProgramStart = useWorkoutStore((state) => state.setProgramStart)
-  const jumpToDay = useWorkoutStore((state) => state.jumpToDay)
   const importWorkoutPlan = useWorkoutStore((state) => state.importWorkoutPlan)
   const switchWorkoutPlan = useWorkoutStore((state) => state.switchWorkoutPlan)
   const programLibrary = useWorkoutStore((state) => state.programLibrary)
   const activeProgramId = useWorkoutStore((state) => state.activeProgramId)
-  const program = useWorkoutStore((state) => state.program)
   const planDisplayName = useWorkoutStore((state) => state.planDisplayName)
   const setPlanDisplayName = useWorkoutStore((state) => state.setPlanDisplayName)
-  const currentPhaseId = useWorkoutStore((state) => state.currentPhaseId)
-  const currentWeek = useWorkoutStore((state) => state.currentWeek)
-  const currentDayIndex = useWorkoutStore((state) => state.currentDayIndex)
   const programStart = useWorkoutStore((state) => state.programStart)
   const weightUnit = useWorkoutStore((state) => state.weightUnit)
   const setWeightUnit = useWorkoutStore((state) => state.setWeightUnit)
@@ -47,7 +42,6 @@ function SettingsPage() {
   const [restDefaultInput, setRestDefaultInput] = useState(String(restTimerDefault))
   const [isSavingPrefs, setIsSavingPrefs] = useState(false)
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
-  const [isUpdatingProgramPosition, setIsUpdatingProgramPosition] = useState(false)
   const [isSwitchingProgram, setIsSwitchingProgram] = useState(false)
   const [isImportingProgram, setIsImportingProgram] = useState(false)
   const [isExportingAllCsv, setIsExportingAllCsv] = useState(false)
@@ -55,9 +49,6 @@ function SettingsPage() {
   const [isExportingMonthlyPdf, setIsExportingMonthlyPdf] = useState(false)
   const [reportMonth, setReportMonth] = useState(() => new Date().toISOString().slice(0, 7))
   const [planNameInput, setPlanNameInput] = useState(planDisplayName)
-  const [selectedPhaseId, setSelectedPhaseId] = useState(currentPhaseId)
-  const [selectedWeek, setSelectedWeek] = useState(String(currentWeek))
-  const [selectedDayIndex, setSelectedDayIndex] = useState(String(currentDayIndex))
   const [pendingSyncCount, setPendingSyncCount] = useState(() => getSyncQueue().length)
 
   const formattedStartDate = useMemo(() => {
@@ -66,24 +57,6 @@ function SettingsPage() {
   }, [programStart])
 
   const [startDate, setStartDate] = useState(formattedStartDate)
-
-  const selectedPhase = useMemo(() => {
-    return (program?.phases || []).find((phase) => phase.id === selectedPhaseId) || null
-  }, [program, selectedPhaseId])
-
-  const selectableWeeks = useMemo(() => {
-    return selectedPhase?.weeks || []
-  }, [selectedPhase])
-
-  const selectedWeekData = useMemo(() => {
-    const parsedWeek = Number(selectedWeek)
-    if (!Number.isFinite(parsedWeek)) return null
-    return selectableWeeks.find((week) => week.weekNumber === parsedWeek) || null
-  }, [selectableWeeks, selectedWeek])
-
-  const selectableDays = useMemo(() => {
-    return selectedWeekData?.days || []
-  }, [selectedWeekData])
 
   const selectedReportLogs = useMemo(() => {
     const [yearText, monthText] = (reportMonth || '').split('-')
@@ -103,40 +76,8 @@ function SettingsPage() {
   }, [formattedStartDate])
 
   useEffect(() => {
-    setSelectedPhaseId(currentPhaseId)
-    setSelectedWeek(String(currentWeek))
-    setSelectedDayIndex(String(currentDayIndex))
-  }, [currentDayIndex, currentPhaseId, currentWeek])
-
-  useEffect(() => {
     setPlanNameInput(planDisplayName)
   }, [planDisplayName])
-
-  useEffect(() => {
-    if (!selectedPhase) return
-
-    const hasSelectedWeek = selectedPhase.weeks.some(
-      (week) => String(week.weekNumber) === String(selectedWeek),
-    )
-
-    if (!hasSelectedWeek) {
-      const firstWeek = selectedPhase.weeks?.[0]?.weekNumber
-      if (firstWeek) setSelectedWeek(String(firstWeek))
-    }
-  }, [selectedPhase, selectedWeek])
-
-  useEffect(() => {
-    if (!selectableDays.length) return
-
-    const hasSelectedDay = selectableDays.some(
-      (day) => String(day.dayIndex) === String(selectedDayIndex),
-    )
-
-    if (!hasSelectedDay) {
-      const fallbackDay = selectableDays.find((day) => !day.isRest)?.dayIndex ?? selectableDays[0].dayIndex
-      setSelectedDayIndex(String(fallbackDay))
-    }
-  }, [selectableDays, selectedDayIndex])
 
   useEffect(() => {
     setRestDefaultInput(String(restTimerDefault))
@@ -281,48 +222,6 @@ function SettingsPage() {
     setPlanDisplayName(normalized)
     setPlanNameInput(normalized)
     setStatus('Plan name updated.')
-  }
-
-  const onApplyProgramPosition = async () => {
-    if (isUpdatingProgramPosition) return
-    if (!selectedPhase) {
-      setStatus('Select a valid phase first.')
-      return
-    }
-
-    const parsedWeek = Number(selectedWeek)
-    if (!Number.isFinite(parsedWeek)) {
-      setStatus('Select a valid week first.')
-      return
-    }
-
-    if (!selectedWeekData) {
-      setStatus('Selected week does not exist in this phase.')
-      return
-    }
-
-    const parsedDayIndex = Number(selectedDayIndex)
-    if (!Number.isFinite(parsedDayIndex)) {
-      setStatus('Select a valid day first.')
-      return
-    }
-
-    const selectedDay = selectedWeekData.days.find((day) => day.dayIndex === parsedDayIndex)
-    if (!selectedDay) {
-      setStatus('Selected day does not exist in this week.')
-      return
-    }
-
-    setIsUpdatingProgramPosition(true)
-    try {
-      await jumpToDay(selectedPhase.id, parsedWeek, parsedDayIndex)
-      setStatus(`Program position updated to ${selectedPhase.name}, Week ${parsedWeek}, ${selectedDay.label}.`)
-    } catch (error) {
-      console.error('Failed to update program position:', error)
-      setStatus('Could not update phase/week/day. Please try again.')
-    } finally {
-      setIsUpdatingProgramPosition(false)
-    }
   }
 
   const onSwitchWorkoutPlan = async (programId) => {
@@ -664,71 +563,6 @@ function SettingsPage() {
               Save Name
             </button>
           </div>
-        </div>
-
-        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/50">
-          <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Program Position</p>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Jump to a specific phase, week, and day in your {planDisplayName}.
-          </p>
-
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-            <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              Phase
-              <select
-                value={selectedPhaseId}
-                onChange={(event) => setSelectedPhaseId(event.target.value)}
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-              >
-                {(program?.phases || []).map((phase) => (
-                  <option key={phase.id} value={phase.id}>{phase.name}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              Week
-              <select
-                value={selectedWeek}
-                onChange={(event) => setSelectedWeek(event.target.value)}
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-              >
-                {selectableWeeks.map((week) => (
-                  <option key={week.weekNumber} value={String(week.weekNumber)}>Week {week.weekNumber}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              Day
-              <select
-                value={selectedDayIndex}
-                onChange={(event) => setSelectedDayIndex(event.target.value)}
-                className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-              >
-                {selectableDays.map((day) => (
-                  <option key={day.dayIndex} value={String(day.dayIndex)}>
-                    Day {day.dayIndex + 1} - {day.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="flex md:items-end mt-2 md:mt-0">
-              <button
-                type="button"
-                onClick={onApplyProgramPosition}
-                disabled={isUpdatingProgramPosition}
-                className="w-full md:w-auto text-center rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-              >
-                {isUpdatingProgramPosition ? 'Updating...' : 'Apply'}
-              </button>
-            </div>
-          </div>
-
-          <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-            Current: {currentPhaseId} · Week {currentWeek} · Day {currentDayIndex + 1}
-          </p>
         </div>
 
         <label className="mt-4 grid max-w-xs gap-1 text-sm text-zinc-600 dark:text-zinc-400">
