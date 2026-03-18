@@ -9,10 +9,10 @@ function SyncIndicator() {
   const [isManualSyncing, setIsManualSyncing] = useState(false)
 
   const statusConfig = {
-    saved: { icon: '☁️', label: 'Saved', color: 'text-emerald-600' },
-    syncing: { icon: '🔄', label: 'Syncing', color: 'text-amber-600' },
-    offline: { icon: '📴', label: 'Offline', color: 'text-zinc-400' },
-    error: { icon: '⚠️', label: 'Sync Error', color: 'text-red-500' },
+    saved: { icon: '☁️', label: 'All workouts synced', color: 'text-emerald-600' },
+    syncing: { icon: '🔄', label: 'Syncing…', color: 'text-amber-600' },
+    offline: { icon: '📴', label: 'Offline – changes queued', color: 'text-zinc-400' },
+    error: { icon: '⚠️', label: 'Sync issue – tap to retry', color: 'text-red-500' },
   }
 
   const config = statusConfig[syncStatus] || statusConfig.saved
@@ -64,13 +64,7 @@ function SyncIndicator() {
       const remaining = getSyncQueue().length
       setPendingCount(remaining)
 
-      if (cleared && remaining === 0 && remoteOk) {
-        useWorkoutStore.setState({ syncStatus: 'saved' })
-      } else if (!navigator.onLine) {
-        useWorkoutStore.setState({ syncStatus: 'offline' })
-      } else {
-        useWorkoutStore.setState({ syncStatus: 'error' })
-      }
+      useWorkoutStore.getState().recomputeSyncStatus({ cleared, remoteOk })
     } finally {
       setIsManualSyncing(false)
     }

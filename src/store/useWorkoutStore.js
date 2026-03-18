@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { storage } from '../utils/storage'
 import { getNextDay } from '../utils/progressTracker'
 import { supabase } from '../lib/supabaseClient'
-import { enqueueMutation } from '../utils/syncQueue'
+import { enqueueMutation, getSyncQueue } from '../utils/syncQueue'
 import defaultProgram from '../data/program.json'
 
 const BUILT_IN_PROGRAM_ID = 'built_in_default_program'
@@ -368,6 +368,30 @@ export const useWorkoutStore = create((set, get) => ({
 
   // Sync status: 'saved' | 'syncing' | 'offline' | 'error'
   syncStatus: 'saved',
+
+  // Central helper to keep syncStatus in sync with connectivity and queue state
+  recomputeSyncStatus: ({ cleared = false, remoteOk = true } = {}) => {
+    const pending = getSyncQueue().length
+
+    if (!navigator.onLine) {
+      // When offline we always surface offline, but still respect queued writes.
+      set({ syncStatus: 'offline' })
+      return
+    }
+
+    if (!remoteOk) {
+      set({ syncStatus: 'error' })
+      return
+    }
+
+    if (cleared && pending === 0) {
+      set({ syncStatus: 'saved' })
+    } else if (pending > 0) {
+      set({ syncStatus: 'error' })
+    } else {
+      set({ syncStatus: 'saved' })
+    }
+  },
 
   syncFromCloud: async ({ setSyncing = true } = {}) => {
     try {

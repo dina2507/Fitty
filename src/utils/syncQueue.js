@@ -176,7 +176,14 @@ async function runFlushQueue() {
           remainingQueue[0] = requestJob
         }
 
-        console.error(`Failed to sync queued job ${job.id}:`, error)
+        console.error('Failed to sync queued job:', {
+          id: job.id,
+          table: job.table,
+          action: job.action,
+          match: job.match || null,
+          message: error?.message,
+          code: error?.code,
+        })
         // Stop processing further jobs to preserve write order.
         break
       }

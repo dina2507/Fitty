@@ -18,26 +18,6 @@ import { flushSyncQueue, getSyncQueue } from './utils/syncQueue'
 
 function useSyncQueueListener() {
   useEffect(() => {
-    const applySyncStatus = (cleared, remoteOk = true) => {
-      const pending = getSyncQueue().length
-
-      if (!remoteOk && navigator.onLine) {
-        useWorkoutStore.setState({ syncStatus: 'error' })
-        return
-      }
-
-      if (cleared && pending === 0) {
-        useWorkoutStore.setState({ syncStatus: 'saved' })
-        return
-      }
-
-      if (!navigator.onLine) {
-        useWorkoutStore.setState({ syncStatus: 'offline' })
-      } else if (pending > 0) {
-        useWorkoutStore.setState({ syncStatus: 'error' })
-      }
-    }
-
     const flushAndUpdate = async () => {
       const cleared = await flushSyncQueue()
 
@@ -47,7 +27,7 @@ function useSyncQueueListener() {
         remoteOk = Boolean(cloud?.ok || cloud?.offline)
       }
 
-      applySyncStatus(cleared, remoteOk)
+      useWorkoutStore.getState().recomputeSyncStatus({ cleared, remoteOk })
     }
 
     // Attempt flush on mount if online

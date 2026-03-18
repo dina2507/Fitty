@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../components/AuthProvider'
 import { supabase } from '../lib/supabaseClient'
 import { useWorkoutStore } from '../store/useWorkoutStore'
+import { flushSyncQueue, getSyncQueue } from '../utils/syncQueue'
 import {
   buildPRsCSV,
   buildWeeklyVolumeCSV,
@@ -39,6 +40,7 @@ function SettingsPage() {
   const restTimerVibration = useWorkoutStore((state) => state.restTimerVibration)
   const setRestTimerVibration = useWorkoutStore((state) => state.setRestTimerVibration)
   const completedDays = useWorkoutStore((state) => state.completedDays)
+  const syncStatus = useWorkoutStore((state) => state.syncStatus)
 
   const [backupText, setBackupText] = useState('')
   const [status, setStatus] = useState('')
@@ -56,6 +58,7 @@ function SettingsPage() {
   const [selectedPhaseId, setSelectedPhaseId] = useState(currentPhaseId)
   const [selectedWeek, setSelectedWeek] = useState(String(currentWeek))
   const [selectedDayIndex, setSelectedDayIndex] = useState(String(currentDayIndex))
+  const [pendingSyncCount, setPendingSyncCount] = useState(() => getSyncQueue().length)
 
   const formattedStartDate = useMemo(() => {
     if (!programStart) return ''
@@ -374,6 +377,36 @@ function SettingsPage() {
     setStatus('Training preferences saved.')
   }
 
+  const handleSettingsManualSync = async () => {
+    if (!navigator.onLine) {
+      setStatus('You are currently offline. Changes will sync automatically once you are back online.')
+      setPendingSyncCount(getSyncQueue().length)
+      return
+    }
+
+    useWorkoutStore.setState({ syncStatus: 'syncing' })
+
+    const cleared = await flushSyncQueue()
+    let remoteOk = true
+
+    if (cleared) {
+      const cloud = await useWorkoutStore.getState().syncFromCloud({ setSyncing: false })
+      remoteOk = Boolean(cloud?.ok || cloud?.offline)
+    }
+
+    const remaining = getSyncQueue().length
+    setPendingSyncCount(remaining)
+    useWorkoutStore.getState().recomputeSyncStatus({ cleared, remoteOk })
+
+    if (remaining === 0 && remoteOk) {
+      setStatus('All workouts are synced with the cloud.')
+    } else if (!navigator.onLine) {
+      setStatus('You went offline while syncing. Your changes are queued and will sync later.')
+    } else if (!remoteOk) {
+      setStatus('Some data could not be synced. You can retry from here or the header.')
+    }
+  }
+
   const onLogout = async () => {
     await supabase.auth.signOut()
     navigate('/auth')
@@ -438,7 +471,7 @@ function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto grid max-w-5xl gap-4 px-4 py-6">
+    <div className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-6">
       {/* Account Section */}
       <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Account</h2>
@@ -447,7 +480,7 @@ function SettingsPage() {
             <p className="text-sm text-zinc-600 dark:text-zinc-400">Logged in as</p>
             <p className="font-medium truncate text-zinc-900 dark:text-zinc-100">{user?.email || '—'}</p>
           </div>
-          <div className="flex flex-col sm:flex-row w-full sm:w-auto gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
             <button
               type="button"
               onClick={onLogout}
@@ -683,6 +716,37 @@ function SettingsPage() {
             className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none ring-zinc-900 focus:ring dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
           />
         </label>
+      </section>
+
+      {/* Cloud Sync Overview */}
+      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+        <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Cloud Sync</h3>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Fitty saves everything locally first, then syncs changes to the cloud when you are online.
+        </p>
+
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-zinc-500">Current status</p>
+            <p className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+              {syncStatus === 'syncing' && 'Syncing in progress…'}
+              {syncStatus === 'saved' && 'All workouts are synced.'}
+              {syncStatus === 'offline' && 'Offline – changes will sync when you are back online.'}
+              {syncStatus === 'error' && 'Sync issue – you can retry syncing your changes.'}
+            </p>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              Pending changes in the queue: {pendingSyncCount}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSettingsManualSync}
+            className="w-full rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 sm:w-auto dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            Sync Now
+          </button>
+        </div>
       </section>
 
       {/* Backup & Data */}
