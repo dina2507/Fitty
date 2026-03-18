@@ -22,7 +22,7 @@ function useSyncQueueListener() {
       const cleared = await flushSyncQueue()
 
       let remoteOk = true
-      if (cleared && navigator.onLine) {
+      if (navigator.onLine) {
         const cloud = await useWorkoutStore.getState().syncFromCloud({ setSyncing: false })
         remoteOk = Boolean(cloud?.ok || cloud?.offline)
       }

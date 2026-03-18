@@ -171,12 +171,7 @@ async function runFlushQueue() {
       }
 
       if (error) {
-        // Preserve any payload sanitization so the next retry can keep progressing.
-        if (requestJob !== job && remainingQueue.length > 0) {
-          remainingQueue[0] = requestJob
-        }
-
-        console.error('Failed to sync queued job:', {
+        console.error('Dropping permanently failing queued job:', {
           id: job.id,
           table: job.table,
           action: job.action,
@@ -184,8 +179,9 @@ async function runFlushQueue() {
           message: error?.message,
           code: error?.code,
         })
-        // Stop processing further jobs to preserve write order.
-        break
+        // Do not reinsert this job into remainingQueue so it does not
+        // block newer writes forever. It will be effectively discarded.
+        continue
       }
 
       // Success! Remove from our working clone

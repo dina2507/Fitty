@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { enqueueMutation } from '../utils/syncQueue'
 import { useAuth } from '../components/AuthProvider'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 
@@ -42,8 +43,14 @@ function ProgramPage() {
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this workout template?')) return
     try {
-      const { error } = await supabase.from('custom_workouts').delete().eq('id', id)
-      if (error) throw error
+      if (!navigator.onLine) {
+        enqueueMutation('custom_workouts', 'delete', null, { id })
+      } else {
+        const { error } = await supabase.from('custom_workouts').delete().eq('id', id)
+        if (error) {
+          enqueueMutation('custom_workouts', 'delete', null, { id })
+        }
+      }
       setCustomWorkouts(prev => prev.filter(w => w.id !== id))
     } catch (error) {
       console.error('Failed to delete custom workout:', error)

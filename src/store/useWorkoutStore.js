@@ -68,10 +68,7 @@ function normalizeRemoteWorkoutLog(row) {
 }
 
 function getCompletedDayKey(day) {
-  if (day?.id) return `id:${day.id}`
-
   return [
-    'fallback',
     String(day?.date || ''),
     String(day?.phaseId || day?.phase_id || ''),
     String(day?.week ?? day?.week_number ?? ''),
@@ -421,7 +418,11 @@ export const useWorkoutStore = create((set, get) => ({
   },
 
   syncFromCloud: async ({ setSyncing = true } = {}) => {
-    try {
+    if (cloudSyncPromise) {
+      return cloudSyncPromise
+    }
+
+    cloudSyncPromise = (async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.user) {
         set({ syncStatus: 'offline' })
@@ -521,16 +522,17 @@ export const useWorkoutStore = create((set, get) => ({
         }
       }
       
-      if (remoteBodyweight !== null) {
-        if (remoteBodyweight.length > 0) {
-          storage.saveBodyweightLogs(remoteBodyweight)
-          statePatch.bodyweightLogs = remoteBodyweight
-        }
+      if (remoteBodyweight === null) {
+        hasRemoteError = true
+      } else if (remoteBodyweight !== undefined) {
+        storage.saveBodyweightLogs(remoteBodyweight)
+        statePatch.bodyweightLogs = remoteBodyweight
       }
 
-      if (remoteCustomizations !== null) {
-        const localC = get().programCustomizations
-        const mergedC = { ...localC, ...remoteCustomizations }
+      if (remoteCustomizations === null) {
+        hasRemoteError = true
+      } else if (remoteCustomizations !== undefined) {
+        const mergedC = remoteCustomizations || {}
         storage.saveProgramCustomizations(mergedC)
         statePatch.programCustomizations = mergedC
       }
@@ -540,16 +542,21 @@ export const useWorkoutStore = create((set, get) => ({
       }
 
       set({ syncStatus: hasRemoteError ? 'error' : 'saved' })
-      return {
+      const result = {
         ok: !hasRemoteError,
         offline: false,
         pulledWorkouts: Array.isArray(remoteWorkouts) ? remoteWorkouts.length : 0,
       }
-    } catch (err) {
+      return result
+    })().catch((err) => {
       console.error('Failed to sync from Supabase:', err)
       set({ syncStatus: navigator.onLine ? 'error' : 'offline' })
       return { ok: false, offline: !navigator.onLine, error: err }
-    }
+    }).finally(() => {
+      cloudSyncPromise = null
+    })
+
+    return cloudSyncPromise
   },
 
   // Initialize store from localStorage, then Supabase if authenticated
@@ -622,22 +629,6 @@ export const useWorkoutStore = create((set, get) => ({
 
     // Then fetch latest cloud changes so other-device updates appear locally.
     await get().syncFromCloud({ setSyncing: true })
-
-    // Auto-sync when user returns to the tab/app (mobile browser background resume)
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        get().syncFromCloud({ setSyncing: false })
-      }
-    }
-    document.removeEventListener('visibilitychange', onVisibilityChange)
-    document.addEventListener('visibilitychange', onVisibilityChange)
-
-    // Auto-sync when device comes back online
-    const onOnline = () => {
-      get().syncFromCloud({ setSyncing: true })
-    }
-    window.removeEventListener('online', onOnline)
-    window.addEventListener('online', onOnline)
   },
 
   // Set program start date (first launch)

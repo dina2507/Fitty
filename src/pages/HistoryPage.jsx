@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import { useAuth } from '../components/AuthProvider'
 import { supabase } from '../lib/supabaseClient'
+import { enqueueMutation } from '../utils/syncQueue'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import { calculateWorkoutVolume } from '../utils/volumeCalc'
 import { getHistoricalPRs } from '../hooks/usePRDetection'
@@ -317,12 +318,22 @@ function HistoryPage() {
     try {
       if (user?.id) {
         const dateOnly = formatDateOnly(item.date)
-        const { error } = await supabase
-          .from('workout_logs')
-          .delete()
-          .match({ user_id: user.id, date: dateOnly })
+        const matchCriteria = item.id
+          ? { id: item.id }
+          : { user_id: user.id, date: dateOnly }
 
-        if (error) throw error
+        if (!navigator.onLine) {
+          enqueueMutation('workout_logs', 'delete', null, matchCriteria)
+        } else {
+          const { error } = await supabase
+            .from('workout_logs')
+            .delete()
+            .match(matchCriteria)
+
+          if (error) {
+            enqueueMutation('workout_logs', 'delete', null, matchCriteria)
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to delete workout log in Supabase:', error)
@@ -380,17 +391,36 @@ function HistoryPage() {
     try {
       if (user?.id) {
         const dateOnly = formatDateOnly(editing.draft.date)
-        const { error } = await supabase
-          .from('workout_logs')
-          .update({
-            exercises: editing.draft.exercises || [],
-            notes: editing.draft.sessionNotes || editing.draft.session_notes || null,
-            duration_minutes: editing.draft.durationMinutes || editing.draft.duration_minutes || null,
-            pr_exercises: editing.draft.prExercises || editing.draft.pr_exercises || [],
-          })
-          .match({ user_id: user.id, date: dateOnly })
+        const matchCriteria = editing.draft.id
+          ? { id: editing.draft.id }
+          : { user_id: user.id, date: dateOnly }
 
-        if (error) throw error
+        const logPayload = {
+          user_id: user.id,
+          date: dateOnly,
+          exercises: editing.draft.exercises || [],
+          notes: editing.draft.sessionNotes || editing.draft.session_notes || null,
+          duration_minutes: editing.draft.durationMinutes || editing.draft.duration_minutes || null,
+          pr_exercises: editing.draft.prExercises || editing.draft.pr_exercises || [],
+        }
+
+        if (!navigator.onLine) {
+          enqueueMutation('workout_logs', 'update', logPayload, matchCriteria)
+        } else {
+          const { error } = await supabase
+            .from('workout_logs')
+            .update({
+              exercises: logPayload.exercises,
+              notes: logPayload.notes,
+              duration_minutes: logPayload.duration_minutes,
+              pr_exercises: logPayload.pr_exercises,
+            })
+            .match(matchCriteria)
+
+          if (error) {
+            enqueueMutation('workout_logs', 'update', logPayload, matchCriteria)
+          }
+        }
       }
     } catch (error) {
       console.error('Failed to update workout log in Supabase:', error)

@@ -142,6 +142,30 @@ function SettingsPage() {
     setRestDefaultInput(String(restTimerDefault))
   }, [restTimerDefault])
 
+  useEffect(() => {
+    const refresh = () => {
+      setPendingSyncCount(getSyncQueue().length)
+    }
+
+    refresh()
+
+    const onStorage = (event) => {
+      if (!event?.key || event.key === 'fitty_offline_sync_queue') {
+        refresh()
+      }
+    }
+
+    window.addEventListener('storage', onStorage)
+    window.addEventListener('online', refresh)
+    window.addEventListener('focus', refresh)
+
+    return () => {
+      window.removeEventListener('storage', onStorage)
+      window.removeEventListener('online', refresh)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [])
+
   const onExport = () => {
     const payload = exportData()
     setBackupText(JSON.stringify(payload, null, 2))
@@ -389,7 +413,7 @@ function SettingsPage() {
     const cleared = await flushSyncQueue()
     let remoteOk = true
 
-    if (cleared) {
+    if (navigator.onLine) {
       const cloud = await useWorkoutStore.getState().syncFromCloud({ setSyncing: false })
       remoteOk = Boolean(cloud?.ok || cloud?.offline)
     }

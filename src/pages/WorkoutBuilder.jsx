@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { supabase } from '../lib/supabaseClient'
+import { enqueueMutation } from '../utils/syncQueue'
 import { useAuth } from '../components/AuthProvider'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
@@ -455,11 +456,25 @@ function WorkoutBuilder() {
         updated_at: new Date().toISOString(),
       }
 
-      const { error } = editId
-        ? await supabase.from('custom_workouts').update(payload).eq('id', editId)
-        : await supabase.from('custom_workouts').insert(payload)
-
-      if (error) throw error
+      if (editId) {
+        if (!navigator.onLine) {
+          enqueueMutation('custom_workouts', 'update', payload, { id: editId })
+        } else {
+          const { error } = await supabase.from('custom_workouts').update(payload).eq('id', editId)
+          if (error) {
+            enqueueMutation('custom_workouts', 'update', payload, { id: editId })
+          }
+        }
+      } else {
+        if (!navigator.onLine) {
+          enqueueMutation('custom_workouts', 'insert', payload)
+        } else {
+          const { error } = await supabase.from('custom_workouts').insert(payload)
+          if (error) {
+            enqueueMutation('custom_workouts', 'insert', payload)
+          }
+        }
+      }
       navigate('/program')
     } catch (error) {
       console.error('Failed to save workout template:', error)

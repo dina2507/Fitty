@@ -11,6 +11,10 @@ create table if not exists user_progress (
   current_week int,
   current_day_index int,
   program_start date,
+  -- App-level preferences for units and timers
+  weight_unit text,
+  rest_timer_default int,
+  dismissed_alerts text[],
   updated_at timestamptz default now()
 );
 

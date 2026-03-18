@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import { enqueueMutation } from '../utils/syncQueue'
 import { useAuth } from '../components/AuthProvider'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import { MUSCLE_GROUPS, getMuscleGroupColor } from '../utils/muscleGroups'
@@ -249,20 +250,42 @@ function ExercisesPage() {
   // CRUD for custom exercises
   const handleSaveExercise = async (form) => {
     const secondary_muscles = form.sub_muscle_group ? [form.sub_muscle_group] : null
+    const payload = {
+      user_id: user.id,
+      name: form.name,
+      muscle_group: form.muscle_group,
+      secondary_muscles,
+      equipment: form.equipment,
+      default_sets: form.default_sets,
+      default_reps: form.default_reps,
+      default_rpe: form.default_rpe,
+      default_rest: form.default_rest,
+      notes: form.notes,
+    }
+
     if (editingExercise) {
-      const { error } = await supabase.from('custom_exercises').update({
-        name: form.name, muscle_group: form.muscle_group, secondary_muscles, equipment: form.equipment,
-        default_sets: form.default_sets, default_reps: form.default_reps,
-        default_rpe: form.default_rpe, default_rest: form.default_rest, notes: form.notes,
-      }).eq('id', editingExercise.id)
-      if (!error) await fetchCustomExercises()
+      if (!navigator.onLine) {
+        enqueueMutation('custom_exercises', 'update', payload, { id: editingExercise.id })
+      } else {
+        const { error } = await supabase
+          .from('custom_exercises')
+          .update(payload)
+          .eq('id', editingExercise.id)
+        if (error) {
+          enqueueMutation('custom_exercises', 'update', payload, { id: editingExercise.id })
+        }
+      }
+      await fetchCustomExercises()
     } else {
-      const { error } = await supabase.from('custom_exercises').insert({
-        user_id: user.id, name: form.name, muscle_group: form.muscle_group, secondary_muscles, equipment: form.equipment,
-        default_sets: form.default_sets, default_reps: form.default_reps,
-        default_rpe: form.default_rpe, default_rest: form.default_rest, notes: form.notes,
-      })
-      if (!error) await fetchCustomExercises()
+      if (!navigator.onLine) {
+        enqueueMutation('custom_exercises', 'insert', payload)
+      } else {
+        const { error } = await supabase.from('custom_exercises').insert(payload)
+        if (error) {
+          enqueueMutation('custom_exercises', 'insert', payload)
+        }
+      }
+      await fetchCustomExercises()
     }
     setShowForm(false)
     setEditingExercise(null)
@@ -270,8 +293,17 @@ function ExercisesPage() {
 
   const handleDeleteExercise = async (id) => {
     if (!window.confirm('Delete this exercise?')) return
+    if (!navigator.onLine) {
+      enqueueMutation('custom_exercises', 'delete', null, { id })
+      setCustomExercises(prev => prev.filter(e => e.id !== id))
+      return
+    }
+
     const { error } = await supabase.from('custom_exercises').delete().eq('id', id)
-    if (!error) setCustomExercises(prev => prev.filter(e => e.id !== id))
+    if (error) {
+      enqueueMutation('custom_exercises', 'delete', null, { id })
+    }
+    setCustomExercises(prev => prev.filter(e => e.id !== id))
   }
 
   // Filtered Jeff exercises

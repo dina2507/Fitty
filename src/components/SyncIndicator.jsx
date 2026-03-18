@@ -56,7 +56,7 @@ function SyncIndicator() {
       const cleared = await flushSyncQueue()
       let remoteOk = true
 
-      if (cleared && navigator.onLine) {
+      if (navigator.onLine) {
         const cloud = await syncFromCloud({ setSyncing: false })
         remoteOk = Boolean(cloud?.ok || cloud?.offline)
       }
