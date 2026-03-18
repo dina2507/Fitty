@@ -91,6 +91,13 @@ export function saveSyncQueue(queue) {
 }
 
 /**
+ * Clears all queued mutations.
+ */
+export function clearSyncQueue() {
+  saveSyncQueue([])
+}
+
+/**
  * Pushes a new mutation to the offline queue.
  * @param {string} table - Supabase table name
  * @param {string} action - 'upsert', 'insert', 'delete', etc.

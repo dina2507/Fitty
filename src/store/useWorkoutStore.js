@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { storage } from '../utils/storage'
 import { getNextDay } from '../utils/progressTracker'
 import { supabase } from '../lib/supabaseClient'
-import { enqueueMutation, getSyncQueue } from '../utils/syncQueue'
+import { clearSyncQueue, enqueueMutation, getSyncQueue } from '../utils/syncQueue'
 import defaultProgram from '../data/program.json'
 
 const BUILT_IN_PROGRAM_ID = 'built_in_default_program'
@@ -77,6 +77,25 @@ function getCompletedDayKey(day) {
   ].join('|')
 }
 
+function getBodyweightKey(entry) {
+  return String(entry?.date || '').split('T')[0]
+}
+
+function hasPendingMutation(queue, table) {
+  return (Array.isArray(queue) ? queue : []).some((job) => job?.table === table)
+}
+
+function hasPendingDeleteAll(queue, table, userId) {
+  if (!userId) return false
+
+  return (Array.isArray(queue) ? queue : []).some((job) => {
+    if (job?.table !== table || job?.action !== 'delete') return false
+    const match = job?.match
+    if (!match || typeof match !== 'object') return false
+    return match.user_id === userId && Object.keys(match).length === 1
+  })
+}
+
 function mergeCompletedDays(localDays = [], remoteDays = []) {
   const local = Array.isArray(localDays) ? localDays : []
   const remote = Array.isArray(remoteDays) ? remoteDays : []
@@ -96,6 +115,54 @@ function mergeCompletedDays(localDays = [], remoteDays = []) {
 
   const merged = [...mergedByKey.values()]
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  return {
+    items: merged,
+    changed: JSON.stringify(merged) !== JSON.stringify(local),
+  }
+}
+
+function mergeBodyweightLogs(localLogs = [], remoteLogs = []) {
+  const local = Array.isArray(localLogs) ? localLogs : []
+  const remote = Array.isArray(remoteLogs) ? remoteLogs : []
+
+  const mergedByDate = new Map()
+
+  remote.forEach((entry) => {
+    mergedByDate.set(getBodyweightKey(entry), entry)
+  })
+
+  local.forEach((entry) => {
+    const key = getBodyweightKey(entry)
+    if (!mergedByDate.has(key)) {
+      mergedByDate.set(key, entry)
+    }
+  })
+
+  const merged = [...mergedByDate.values()]
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  return {
+    items: merged,
+    changed: JSON.stringify(merged) !== JSON.stringify(local),
+  }
+}
+
+function mergeProgramCustomizations(localCustomizations = {}, remoteCustomizations = {}) {
+  const local = localCustomizations && typeof localCustomizations === 'object'
+    ? localCustomizations
+    : {}
+  const remote = remoteCustomizations && typeof remoteCustomizations === 'object'
+    ? remoteCustomizations
+    : {}
+
+  const merged = { ...remote }
+
+  Object.entries(local).forEach(([exerciseId, customization]) => {
+    if (!(exerciseId in merged)) {
+      merged[exerciseId] = customization
+    }
+  })
 
   return {
     items: merged,
@@ -440,10 +507,22 @@ export const useWorkoutStore = create((set, get) => ({
         fetchProgressFromSupabase(session.user.id),
         fetchWorkoutLogsFromSupabase(session.user.id),
         fetchBodyweightLogsFromSupabase(session.user.id),
-        fetchProgramCustomizationsFromSupabase(session.user.id)
+        fetchProgramCustomizationsFromSupabase(session.user.id),
       ])
 
+      const pendingQueue = getSyncQueue()
+      const hasPendingProgressWrites = hasPendingMutation(pendingQueue, 'user_progress')
+      const hasPendingWorkoutWrites = hasPendingMutation(pendingQueue, 'workout_logs')
+      const hasPendingBodyweightWrites = hasPendingMutation(pendingQueue, 'bodyweight_logs')
+      const hasPendingCustomizationWrites = hasPendingMutation(pendingQueue, 'program_customizations')
+
+      const hasPendingProgressDeleteAll = hasPendingDeleteAll(pendingQueue, 'user_progress', session.user.id)
+      const hasPendingWorkoutDeleteAll = hasPendingDeleteAll(pendingQueue, 'workout_logs', session.user.id)
+      const hasPendingBodyweightDeleteAll = hasPendingDeleteAll(pendingQueue, 'bodyweight_logs', session.user.id)
+      const hasPendingCustomizationDeleteAll = hasPendingDeleteAll(pendingQueue, 'program_customizations', session.user.id)
+
       const statePatch = {}
+      let hasRemoteError = false
 
       if (remoteProgress) {
         const cloudProgress = {
@@ -458,13 +537,13 @@ export const useWorkoutStore = create((set, get) => ({
           currentDayIndex: state.currentDayIndex,
         }
 
-        // Only apply remote progress if it is a valid position AND
-        // it is ahead of or equal to the local position in the program.
-        // This prevents a stale cloud value from pulling the user back
-        // after they manually jump to a later day.
         if (isValidProgress(activeProgram, cloudProgress)) {
           const cmp = compareProgressPosition(cloudProgress, localProgress, activeProgram)
-          if (cmp >= 0) {
+          const shouldApplyProgress = hasPendingProgressDeleteAll
+            ? false
+            : (hasPendingProgressWrites ? cmp >= 0 : true)
+
+          if (shouldApplyProgress) {
             storage.saveProgress(cloudProgress)
             statePatch.currentPhaseId = cloudProgress.currentPhaseId
             statePatch.currentWeek = cloudProgress.currentWeek
@@ -472,27 +551,27 @@ export const useWorkoutStore = create((set, get) => ({
           }
         }
 
-        if (remoteProgress.program_start) {
-          storage.saveProgramStart(remoteProgress.program_start)
-          statePatch.programStart = remoteProgress.program_start
-        }
+        if (!hasPendingProgressWrites && !hasPendingProgressDeleteAll) {
+          const remoteProgramStart = remoteProgress.program_start || null
+          storage.saveProgramStart(remoteProgramStart || '')
+          statePatch.programStart = remoteProgramStart
 
-        if (remoteProgress.weight_unit) {
-          storage.saveWeightUnit(remoteProgress.weight_unit)
-          statePatch.weightUnit = remoteProgress.weight_unit
-        }
+          const remoteWeightUnit = remoteProgress.weight_unit === 'lbs' ? 'lbs' : 'kg'
+          storage.saveWeightUnit(remoteWeightUnit)
+          statePatch.weightUnit = remoteWeightUnit
 
-        if (Number.isFinite(Number(remoteProgress.rest_timer_default))) {
           const parsedRestTimer = Number(remoteProgress.rest_timer_default)
-          storage.saveRestTimerDefault(parsedRestTimer)
-          statePatch.restTimerDefault = parsedRestTimer
-        }
+          const normalizedRestTimer = Number.isFinite(parsedRestTimer) ? parsedRestTimer : 120
+          storage.saveRestTimerDefault(normalizedRestTimer)
+          statePatch.restTimerDefault = normalizedRestTimer
 
-        if (Array.isArray(remoteProgress.dismissed_alerts)) {
-          storage.saveDismissedAlerts(remoteProgress.dismissed_alerts)
-          statePatch.dismissedAlerts = remoteProgress.dismissed_alerts
+          const normalizedDismissedAlerts = Array.isArray(remoteProgress.dismissed_alerts)
+            ? remoteProgress.dismissed_alerts
+            : []
+          storage.saveDismissedAlerts(normalizedDismissedAlerts)
+          statePatch.dismissedAlerts = normalizedDismissedAlerts
         }
-      } else if (remoteWorkouts && remoteWorkouts.length > 0) {
+      } else if (!hasPendingProgressWrites && !hasPendingProgressDeleteAll && remoteWorkouts && remoteWorkouts.length > 0) {
         const lastWorkout = remoteWorkouts[remoteWorkouts.length - 1]
         if (lastWorkout.phaseId) {
           const nextDay = getNextDay(activeProgram, lastWorkout.phaseId, lastWorkout.week, lastWorkout.dayIndex)
@@ -500,7 +579,7 @@ export const useWorkoutStore = create((set, get) => ({
             const cloudProgress = {
               currentPhaseId: nextDay.phaseId,
               currentWeek: nextDay.week,
-              currentDayIndex: nextDay.dayIndex
+              currentDayIndex: nextDay.dayIndex,
             }
             storage.saveProgress(cloudProgress)
             statePatch.currentPhaseId = cloudProgress.currentPhaseId
@@ -510,31 +589,82 @@ export const useWorkoutStore = create((set, get) => ({
         }
       }
 
-      let hasRemoteError = false
-
       if (remoteWorkouts === null) {
         hasRemoteError = true
       } else {
-        const merged = mergeCompletedDays(get().completedDays, remoteWorkouts)
-        if (merged.changed) {
-          storage.saveCompletedDays(merged.items)
-          statePatch.completedDays = merged.items
+        const localCompletedDays = get().completedDays
+
+        if (!hasPendingWorkoutDeleteAll) {
+          const nextCompletedDays = hasPendingWorkoutWrites
+            ? mergeCompletedDays(localCompletedDays, remoteWorkouts).items
+            : remoteWorkouts
+
+          if (JSON.stringify(nextCompletedDays) !== JSON.stringify(localCompletedDays)) {
+            storage.saveCompletedDays(nextCompletedDays)
+            statePatch.completedDays = nextCompletedDays
+          }
         }
       }
       
       if (remoteBodyweight === null) {
         hasRemoteError = true
       } else if (remoteBodyweight !== undefined) {
-        storage.saveBodyweightLogs(remoteBodyweight)
-        statePatch.bodyweightLogs = remoteBodyweight
+        const localBodyweightLogs = get().bodyweightLogs
+
+        if (!hasPendingBodyweightDeleteAll) {
+          const nextBodyweightLogs = hasPendingBodyweightWrites
+            ? mergeBodyweightLogs(localBodyweightLogs, remoteBodyweight).items
+            : remoteBodyweight
+
+          if (JSON.stringify(nextBodyweightLogs) !== JSON.stringify(localBodyweightLogs)) {
+            storage.saveBodyweightLogs(nextBodyweightLogs)
+            statePatch.bodyweightLogs = nextBodyweightLogs
+          }
+        }
       }
 
       if (remoteCustomizations === null) {
         hasRemoteError = true
       } else if (remoteCustomizations !== undefined) {
-        const mergedC = remoteCustomizations || {}
-        storage.saveProgramCustomizations(mergedC)
-        statePatch.programCustomizations = mergedC
+        const localCustomizations = get().programCustomizations || {}
+
+        if (!hasPendingCustomizationDeleteAll) {
+          const nextCustomizations = hasPendingCustomizationWrites
+            ? mergeProgramCustomizations(localCustomizations, remoteCustomizations || {}).items
+            : (remoteCustomizations || {})
+
+          if (JSON.stringify(nextCustomizations) !== JSON.stringify(localCustomizations)) {
+            storage.saveProgramCustomizations(nextCustomizations)
+            statePatch.programCustomizations = nextCustomizations
+          }
+        }
+      }
+
+      const shouldApplyCloudResetDefaults = !hasPendingProgressWrites
+        && !hasPendingProgressDeleteAll
+        && !remoteProgress
+        && Array.isArray(remoteWorkouts)
+        && remoteWorkouts.length === 0
+        && Array.isArray(remoteBodyweight)
+        && remoteBodyweight.length === 0
+        && remoteCustomizations
+        && Object.keys(remoteCustomizations).length === 0
+
+      if (shouldApplyCloudResetDefaults) {
+        const fallbackProgress = getDefaultProgressForProgram(activeProgram)
+        storage.saveProgress(fallbackProgress)
+        storage.saveProgramStart('')
+        storage.saveWeightUnit('kg')
+        storage.saveRestTimerDefault(120)
+        storage.saveDismissedAlerts([])
+
+        statePatch.currentPhaseId = fallbackProgress.currentPhaseId
+        statePatch.currentWeek = fallbackProgress.currentWeek
+        statePatch.currentDayIndex = fallbackProgress.currentDayIndex
+        statePatch.programStart = null
+        statePatch.weightUnit = 'kg'
+        statePatch.restTimerDefault = 120
+        statePatch.dismissedAlerts = []
       }
 
       if (Object.keys(statePatch).length > 0) {
@@ -1388,6 +1518,8 @@ export const useWorkoutStore = create((set, get) => ({
 
   // Reset everything
   resetProgram: async () => {
+    // Drop any stale queued writes first so old mutations do not rehydrate cleared data.
+    clearSyncQueue()
     storage.clearAll()
     const baseLibrary = buildProgramLibrary([])
     const baseProgress = getDefaultProgressForProgram(defaultProgram)
@@ -1400,6 +1532,7 @@ export const useWorkoutStore = create((set, get) => ({
       currentDayIndex: baseProgress.currentDayIndex,
       programStart: null,
       completedDays: [],
+      bodyweightLogs: [],
       activeCustomTemplate: null,
       planDisplayName: 'Dina Workout plan',
       weightUnit: 'kg',
@@ -1407,17 +1540,45 @@ export const useWorkoutStore = create((set, get) => ({
       restTimerVibration: true,
       scheduledExercises: [],
       dismissedAlerts: [],
+      programCustomizations: {},
       milestoneToastQueue: [],
       syncStatus: 'saved',
     })
 
-    // Clear Supabase progress
+    // Clear Supabase-backed training state so reset propagates across devices.
     const { data: { session } } = await supabase.auth.getSession()
     if (session?.user) {
-      await supabase
-        .from('user_progress')
-        .delete()
-        .eq('user_id', session.user.id)
+      const resetTables = [
+        'user_progress',
+        'workout_logs',
+        'bodyweight_logs',
+        'program_customizations',
+      ]
+
+      if (!navigator.onLine) {
+        resetTables.forEach((table) => {
+          enqueueMutation(table, 'delete', null, { user_id: session.user.id })
+        })
+        set({ syncStatus: 'offline' })
+        return
+      }
+
+      set({ syncStatus: 'syncing' })
+      let queuedFallback = false
+
+      for (const table of resetTables) {
+        const { error } = await supabase
+          .from(table)
+          .delete()
+          .eq('user_id', session.user.id)
+
+        if (error) {
+          enqueueMutation(table, 'delete', null, { user_id: session.user.id })
+          queuedFallback = true
+        }
+      }
+
+      set({ syncStatus: queuedFallback ? 'error' : 'saved' })
     }
   },
 }))

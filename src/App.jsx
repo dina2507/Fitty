@@ -13,12 +13,19 @@ import ExercisesPage from './pages/ExercisesPage'
 import ProgramPage from './pages/ProgramPage'
 import WorkoutBuilder from './pages/WorkoutBuilder'
 import StatsPage from './pages/StatsPage'
+import { supabase } from './lib/supabaseClient'
 import { useWorkoutStore } from './store/useWorkoutStore'
-import { flushSyncQueue, getSyncQueue } from './utils/syncQueue'
+import { flushSyncQueue } from './utils/syncQueue'
 
 function useSyncQueueListener() {
   useEffect(() => {
+    let disposed = false
+    let realtimeChannel = null
+    let realtimeDebounceId = null
+
     const flushAndUpdate = async () => {
+      if (disposed) return
+
       const cleared = await flushSyncQueue()
 
       let remoteOk = true
@@ -27,7 +34,75 @@ function useSyncQueueListener() {
         remoteOk = Boolean(cloud?.ok || cloud?.offline)
       }
 
-      useWorkoutStore.getState().recomputeSyncStatus({ cleared, remoteOk })
+      if (!disposed) {
+        useWorkoutStore.getState().recomputeSyncStatus({ cleared, remoteOk })
+      }
+    }
+
+    const scheduleRealtimeSync = () => {
+      if (disposed || !navigator.onLine) return
+
+      if (realtimeDebounceId) {
+        window.clearTimeout(realtimeDebounceId)
+      }
+
+      realtimeDebounceId = window.setTimeout(() => {
+        flushAndUpdate()
+      }, 700)
+    }
+
+    const unsubscribeRealtime = () => {
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel)
+        realtimeChannel = null
+      }
+    }
+
+    const subscribeRealtime = (userId) => {
+      unsubscribeRealtime()
+      if (!userId) return
+
+      const onRemoteMutation = () => {
+        scheduleRealtimeSync()
+      }
+
+      realtimeChannel = supabase
+        .channel(`fitty-sync-${userId}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'user_progress',
+          filter: `user_id=eq.${userId}`,
+        }, onRemoteMutation)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'workout_logs',
+          filter: `user_id=eq.${userId}`,
+        }, onRemoteMutation)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'bodyweight_logs',
+          filter: `user_id=eq.${userId}`,
+        }, onRemoteMutation)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'program_customizations',
+          filter: `user_id=eq.${userId}`,
+        }, onRemoteMutation)
+        .subscribe((status) => {
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            scheduleRealtimeSync()
+          }
+        })
+    }
+
+    const bootstrapRealtime = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (disposed) return
+      subscribeRealtime(session?.user?.id || null)
     }
 
     // Attempt flush on mount if online
@@ -56,17 +131,37 @@ function useSyncQueueListener() {
       if (navigator.onLine) {
         flushAndUpdate()
       }
-    }, 45000)
+    }, 30000)
+
+    const {
+      data: { subscription: authSubscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      subscribeRealtime(session?.user?.id || null)
+
+      if (session?.user && navigator.onLine) {
+        flushAndUpdate()
+      }
+    })
+
+    bootstrapRealtime()
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('focus', handleFocus)
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
+      disposed = true
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('focus', handleFocus)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.clearInterval(pollId)
+
+      if (realtimeDebounceId) {
+        window.clearTimeout(realtimeDebounceId)
+      }
+
+      unsubscribeRealtime()
+      authSubscription.unsubscribe()
     }
   }, [])
 }
