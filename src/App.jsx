@@ -13,6 +13,8 @@ import ExercisesPage from './pages/ExercisesPage'
 import ProgramPage from './pages/ProgramPage'
 import WorkoutBuilder from './pages/WorkoutBuilder'
 import StatsPage from './pages/StatsPage'
+import WorkoutToolsPage from './pages/WorkoutToolsPage'
+import PersonalRecordsPage from './pages/PersonalRecordsPage'
 import { useWorkoutStore } from './store/useWorkoutStore'
 
 function AppContent() {
@@ -98,6 +100,22 @@ function AppContent() {
             element={
               <ProtectedRoute>
                 <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/tools"
+            element={
+              <ProtectedRoute>
+                <WorkoutToolsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/records"
+            element={
+              <ProtectedRoute>
+                <PersonalRecordsPage />
               </ProtectedRoute>
             }
           />

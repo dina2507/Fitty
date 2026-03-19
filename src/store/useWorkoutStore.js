@@ -435,9 +435,15 @@ function triggerAutoDriveBackup() {
   if (!autoDriveBackup) return
 
   import('../lib/googleDrive')
-    .then(({ uploadBackupToDrive, signInWithGoogle }) => {
+    .then(({ uploadAutomaticBackupToDrive, uploadBackupToDrive, signInWithGoogle }) => {
       signInWithGoogle()
-        .then((token) => uploadBackupToDrive(storage.exportData(), token))
+        .then((token) => {
+          if (typeof uploadAutomaticBackupToDrive === 'function') {
+            return uploadAutomaticBackupToDrive(storage.exportData(), token)
+          }
+
+          return uploadBackupToDrive(storage.exportData(), token, { automatic: true })
+        })
         .catch((error) => {
           console.error('Auto Google Drive backup failed:', error)
         })
@@ -673,6 +679,7 @@ export const useWorkoutStore = create((set, get) => ({
   restTimerVibration: true,
   scheduledExercises: [],
   dismissedAlerts: [],
+  exerciseGoals: [],
   programCustomizations: {}, // Map of { [originalExerciseId]: overriddenExerciseObject }
   isSaved: true,
 
@@ -955,6 +962,7 @@ export const useWorkoutStore = create((set, get) => ({
     const savedRestTimerDefault = storage.getRestTimerDefault()
     const savedRestTimerVibration = storage.getRestTimerVibration()
     const savedDismissedAlerts = storage.getDismissedAlerts()
+    const savedExerciseGoals = storage.getExerciseGoals()
 
     set({
       program: activeProgram,
@@ -999,6 +1007,10 @@ export const useWorkoutStore = create((set, get) => ({
 
     if (savedScheduledExercises) {
       set({ scheduledExercises: savedScheduledExercises })
+    }
+
+    if (Array.isArray(savedExerciseGoals)) {
+      set({ exerciseGoals: savedExerciseGoals })
     }
 
     set({
@@ -1344,6 +1356,58 @@ export const useWorkoutStore = create((set, get) => ({
       })
       set({ syncStatus: res.offline ? 'offline' : (res.error ? 'error' : 'saved') })
     }
+  },
+
+  upsertExerciseGoal: (goalInput = {}) => {
+    const state = get()
+    const exerciseName = String(goalInput.exerciseName || '').trim()
+    if (!exerciseName) return null
+
+    const type = goalInput.type === 'e1rm' ? 'e1rm' : 'top_set'
+    const targetWeight = Number(goalInput.targetWeight)
+    if (!Number.isFinite(targetWeight) || targetWeight <= 0) return null
+
+    const targetReps = type === 'top_set'
+      ? Math.max(1, Number.isFinite(Number(goalInput.targetReps)) ? Number(goalInput.targetReps) : 1)
+      : null
+
+    const nowIso = new Date().toISOString()
+    const nextGoal = {
+      id: goalInput.id || `goal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      exerciseName,
+      type,
+      targetWeight,
+      targetReps,
+      notes: String(goalInput.notes || '').trim(),
+      createdAt: goalInput.createdAt || nowIso,
+      updatedAt: nowIso,
+    }
+
+    const existingIndex = state.exerciseGoals.findIndex((item) => item.id === nextGoal.id)
+    const updatedGoals = [...state.exerciseGoals]
+    if (existingIndex >= 0) {
+      updatedGoals[existingIndex] = {
+        ...updatedGoals[existingIndex],
+        ...nextGoal,
+      }
+    } else {
+      updatedGoals.unshift(nextGoal)
+    }
+
+    storage.saveExerciseGoals(updatedGoals)
+    set({ exerciseGoals: updatedGoals, syncStatus: 'saved' })
+    return nextGoal.id
+  },
+
+  removeExerciseGoal: (goalId) => {
+    if (!goalId) return false
+    const state = get()
+    const updatedGoals = state.exerciseGoals.filter((goal) => goal.id !== goalId)
+    if (updatedGoals.length === state.exerciseGoals.length) return false
+
+    storage.saveExerciseGoals(updatedGoals)
+    set({ exerciseGoals: updatedGoals, syncStatus: 'saved' })
+    return true
   },
 
   enqueueMilestoneToasts: (badgeIds) => {
@@ -1848,6 +1912,7 @@ export const useWorkoutStore = create((set, get) => ({
       restTimerVibration: true,
       scheduledExercises: [],
       dismissedAlerts: [],
+      exerciseGoals: [],
       programCustomizations: {},
       milestoneToastQueue: [],
       syncStatus: 'saved',

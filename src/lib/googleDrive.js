@@ -16,12 +16,41 @@ const DRIVE_DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const DRIVE_FOLDER_NAME = 'Fitty Backups'
 const BACKUP_PREFIX = 'fitty-backup'
+const AUTO_BACKUP_SEGMENT = 'auto'
+const TOKEN_STORAGE_KEY = 'fitty_google_drive_access_token'
+const TOKEN_EXPIRES_AT_STORAGE_KEY = 'fitty_google_drive_access_token_expires_at'
+const AUTOMATIC_BACKUP_KEEP_COUNT = 5
+const DEFAULT_BACKUP_KEEP_COUNT = 10
 
 let googleScriptsPromise = null
 let googleTokenClient = null
 let googleAccessToken = null
 let googleTokenExpiresAt = 0
 let signInPromise = null
+
+function readPersistedToken() {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return
+  }
+
+  try {
+    const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY)
+    const storedExpiresAt = Number(localStorage.getItem(TOKEN_EXPIRES_AT_STORAGE_KEY) || 0)
+
+    if (!storedToken || !Number.isFinite(storedExpiresAt) || Date.now() >= storedExpiresAt - 30_000) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY)
+      localStorage.removeItem(TOKEN_EXPIRES_AT_STORAGE_KEY)
+      return
+    }
+
+    googleAccessToken = storedToken
+    googleTokenExpiresAt = storedExpiresAt
+  } catch {
+    // Ignore storage read failures.
+  }
+}
+
+readPersistedToken()
 
 function getGoogleClientId() {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
@@ -102,6 +131,16 @@ function setToken(accessToken, expiresInSeconds = 0) {
       ? Number(expiresInSeconds)
       : 3600
     googleTokenExpiresAt = Date.now() + ttl * 1000
+
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        localStorage.setItem(TOKEN_STORAGE_KEY, googleAccessToken)
+        localStorage.setItem(TOKEN_EXPIRES_AT_STORAGE_KEY, String(googleTokenExpiresAt))
+      } catch {
+        // Ignore storage write failures.
+      }
+    }
+
     if (window.gapi?.client?.setToken) {
       window.gapi.client.setToken({ access_token: googleAccessToken })
     }
@@ -109,6 +148,16 @@ function setToken(accessToken, expiresInSeconds = 0) {
   }
 
   googleTokenExpiresAt = 0
+
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      localStorage.removeItem(TOKEN_STORAGE_KEY)
+      localStorage.removeItem(TOKEN_EXPIRES_AT_STORAGE_KEY)
+    } catch {
+      // Ignore storage write failures.
+    }
+  }
+
   if (window.gapi?.client?.setToken) {
     window.gapi.client.setToken(null)
   }
@@ -160,13 +209,14 @@ async function googleRequest(path, { method = 'GET', accessToken, query, headers
   return text ? JSON.parse(text) : null
 }
 
-function getBackupFileName(timestamp = new Date()) {
+function getBackupFileName(timestamp = new Date(), { automatic = false } = {}) {
   const year = timestamp.getFullYear()
   const month = String(timestamp.getMonth() + 1).padStart(2, '0')
   const day = String(timestamp.getDate()).padStart(2, '0')
   const hour = String(timestamp.getHours()).padStart(2, '0')
   const minute = String(timestamp.getMinutes()).padStart(2, '0')
-  return `${BACKUP_PREFIX}-${year}-${month}-${day}-${hour}-${minute}.json`
+  const modeSegment = automatic ? `-${AUTO_BACKUP_SEGMENT}` : ''
+  return `${BACKUP_PREFIX}${modeSegment}-${year}-${month}-${day}-${hour}-${minute}.json`
 }
 
 async function getBackupFolderId(accessToken, { createIfMissing = false } = {}) {
@@ -320,10 +370,11 @@ export async function signOutGoogle() {
 // File name format: fitty-backup-YYYY-MM-DD-HH-MM.json
 // If the folder doesn't exist, create it first
 // Returns the uploaded file's Drive ID
-export async function uploadBackupToDrive(data, accessToken) {
+export async function uploadBackupToDrive(data, accessToken, options = {}) {
+  const { automatic = false } = options
   const token = accessToken || await signInWithGoogle()
   const folderId = await getBackupFolderId(token, { createIfMissing: true })
-  const fileName = getBackupFileName(new Date())
+  const fileName = getBackupFileName(new Date(), { automatic })
   const boundary = `fitty_backup_${Math.random().toString(36).slice(2)}`
 
   const metadata = {
@@ -362,10 +413,17 @@ export async function uploadBackupToDrive(data, accessToken) {
     throw new Error('Google Drive backup upload did not return a file ID.')
   }
 
-  // Ensure backup history stays bounded even when uploads are triggered automatically.
-  await pruneOldBackups(token)
+  // Keep only the recent backup history required by mode.
+  await pruneOldBackups(token, {
+    automaticOnly: automatic,
+    keepCount: automatic ? AUTOMATIC_BACKUP_KEEP_COUNT : DEFAULT_BACKUP_KEEP_COUNT,
+  })
 
   return created.id
+}
+
+export async function uploadAutomaticBackupToDrive(data, accessToken) {
+  return uploadBackupToDrive(data, accessToken, { automatic: true })
 }
 
 // List all backup files in the "Fitty Backups" folder, sorted newest first
@@ -430,10 +488,17 @@ export async function downloadBackupFromDrive(fileId, accessToken) {
 
 // Delete old backups — keep only the 10 most recent files
 // Call this after every successful upload
-export async function pruneOldBackups(accessToken) {
+export async function pruneOldBackups(accessToken, options = {}) {
+  const { automaticOnly = false, keepCount = DEFAULT_BACKUP_KEEP_COUNT } = options
   const token = accessToken || await signInWithGoogle()
   const backups = await listBackupFiles(token)
-  const staleBackups = backups.slice(10)
+  const filteredBackups = automaticOnly
+    ? backups.filter((file) => String(file?.name || '').includes(`${BACKUP_PREFIX}-${AUTO_BACKUP_SEGMENT}-`))
+    : backups
+  const normalizedKeepCount = Number.isFinite(Number(keepCount))
+    ? Math.max(1, Number(keepCount))
+    : DEFAULT_BACKUP_KEEP_COUNT
+  const staleBackups = filteredBackups.slice(normalizedKeepCount)
 
   await Promise.all(
     staleBackups.map((file) =>

@@ -1,26 +1,128 @@
-import { Link } from 'react-router-dom'
-import { useMemo, useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { lazy, Suspense, useMemo, useState, useEffect } from 'react'
+import { shallow } from 'zustand/shallow'
 import DayCard from '../components/DayCard'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import PhaseIndicator from '../components/PhaseIndicator'
 import ProgressBar from '../components/ProgressBar'
 import TrainingAlerts from '../components/TrainingAlerts'
 import { useWorkoutStore } from '../store/useWorkoutStore'
-import { CalendarModal } from '../components/CalendarModal'
 import { analyzeRPETrend } from '../utils/rpeTrendAnalysis'
 
+const CalendarModal = lazy(() =>
+  import('../components/CalendarModal').then((module) => ({ default: module.CalendarModal })),
+)
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000
+const RECOVERY_WINDOW_MS = 48 * 60 * 60 * 1000
+const RECOVERY_DISPLAY_GROUPS = ['Chest', 'Back', 'Shoulders', 'Legs', 'Arms', 'Core']
+const LEG_GROUPS = new Set(['Quads', 'Hamstrings', 'Glutes', 'Calves'])
+const ARM_GROUPS = new Set(['Biceps', 'Triceps'])
+
+function toDateOnly(value) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString().split('T')[0]
+}
+
+function computeStreakStats(dayKeys) {
+  const uniqueDays = [...new Set(dayKeys)]
+    .map((dayKey) => new Date(dayKey))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((a, b) => a.getTime() - b.getTime())
+
+  if (uniqueDays.length === 0) {
+    return { current: 0, best: 0 }
+  }
+
+  let best = 1
+  let run = 1
+
+  for (let i = 1; i < uniqueDays.length; i++) {
+    const diff = Math.round((uniqueDays[i].getTime() - uniqueDays[i - 1].getTime()) / ONE_DAY_MS)
+    if (diff === 1) {
+      run += 1
+      best = Math.max(best, run)
+    } else {
+      run = 1
+    }
+  }
+
+  let current = 1
+  for (let i = uniqueDays.length - 1; i > 0; i--) {
+    const diff = Math.round((uniqueDays[i].getTime() - uniqueDays[i - 1].getTime()) / ONE_DAY_MS)
+    if (diff === 1) current += 1
+    else break
+  }
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const latest = new Date(uniqueDays[uniqueDays.length - 1])
+  latest.setHours(0, 0, 0, 0)
+
+  const daysSinceLatest = Math.round((today.getTime() - latest.getTime()) / ONE_DAY_MS)
+  if (daysSinceLatest > 1) {
+    current = 0
+  }
+
+  return { current, best }
+}
+
+function getTopSetWithRpe(exercise) {
+  const sets = Array.isArray(exercise?.sets) ? exercise.sets : []
+  let topSet = null
+
+  sets.forEach((set) => {
+    const weight = Number(set.weight) || 0
+    const reps = Number(set.reps) || 0
+    const rpe = Number(set.rpe)
+
+    if (!weight || !Number.isFinite(rpe)) return
+
+    if (!topSet || weight > topSet.weight || (weight === topSet.weight && reps > topSet.reps)) {
+      topSet = { weight, reps, rpe }
+    }
+  })
+
+  return topSet
+}
+
+function toRecoveryGroup(group) {
+  if (!group) return null
+  if (LEG_GROUPS.has(group)) return 'Legs'
+  if (ARM_GROUPS.has(group)) return 'Arms'
+  return group
+}
+
 function DashboardPage() {
-  const program = useWorkoutStore((state) => state.program)
-  const currentPhaseId = useWorkoutStore((state) => state.currentPhaseId)
-  const currentWeek = useWorkoutStore((state) => state.currentWeek)
-  const currentDayIndex = useWorkoutStore((state) => state.currentDayIndex)
-  const completedDays = useWorkoutStore((state) => state.completedDays)
-  const jumpToDay = useWorkoutStore((state) => state.jumpToDay)
-  const getCurrentDay = useWorkoutStore((state) => state.getCurrentDay)
-  const logBodyweight = useWorkoutStore((state) => state.logBodyweight)
-  const bodyweightLogs = useWorkoutStore((state) => state.bodyweightLogs)
-  const dismissedAlerts = useWorkoutStore((state) => state.dismissedAlerts)
-  const dismissTrainingAlert = useWorkoutStore((state) => state.dismissTrainingAlert)
+  const navigate = useNavigate()
+
+  const {
+    program,
+    currentPhaseId,
+    currentWeek,
+    currentDayIndex,
+    completedDays,
+    jumpToDay,
+    getCurrentDay,
+    logBodyweight,
+    bodyweightLogs,
+    dismissedAlerts,
+    dismissTrainingAlert,
+  } = useWorkoutStore((state) => ({
+    program: state.program,
+    currentPhaseId: state.currentPhaseId,
+    currentWeek: state.currentWeek,
+    currentDayIndex: state.currentDayIndex,
+    completedDays: state.completedDays,
+    jumpToDay: state.jumpToDay,
+    getCurrentDay: state.getCurrentDay,
+    logBodyweight: state.logBodyweight,
+    bodyweightLogs: state.bodyweightLogs,
+    dismissedAlerts: state.dismissedAlerts,
+    dismissTrainingAlert: state.dismissTrainingAlert,
+  }), shallow)
 
   const [bwInput, setBwInput] = useState('')
   const [showSavedMsg, setShowSavedMsg] = useState(false)
@@ -69,20 +171,48 @@ function DashboardPage() {
 
   useEffect(() => {
     if (todaysLog && !showSavedMsg) {
-      setBwInput(todaysLog.weight)
+      setBwInput(String(todaysLog.weight))
     }
-  }, [todaysLog])
+  }, [todaysLog, showSavedMsg])
+
+  useEffect(() => {
+    if (!showSavedMsg) return undefined
+
+    const timeout = window.setTimeout(() => setShowSavedMsg(false), 2000)
+    return () => window.clearTimeout(timeout)
+  }, [showSavedMsg])
 
   const handleLogWeight = () => {
-    if (!bwInput || isNaN(parseFloat(bwInput))) return
-    logBodyweight(parseFloat(bwInput))
+    const parsedWeight = parseFloat(bwInput)
+    if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) return
+
+    logBodyweight(parsedWeight)
     setShowSavedMsg(true)
-    setTimeout(() => setShowSavedMsg(false), 2000)
   }
 
   const currentPhase = program.phases.find((phase) => phase.id === currentPhaseId)
   const weekData = currentPhase?.weeks[currentWeek - 1]
   const currentDay = getCurrentDay()
+
+  const daySelectHandlers = useMemo(() => {
+    const handlers = {}
+    ;(weekData?.days || []).forEach((day) => {
+      handlers[day.dayIndex] = () => jumpToDay(currentPhaseId, currentWeek, day.dayIndex)
+    })
+    return handlers
+  }, [weekData, jumpToDay, currentPhaseId, currentWeek])
+
+  const dayStartHandlers = useMemo(() => {
+    const handlers = {}
+    ;(weekData?.days || []).forEach((day) => {
+      handlers[day.dayIndex] = async () => {
+        await jumpToDay(currentPhaseId, currentWeek, day.dayIndex)
+        navigate('/workout')
+      }
+    })
+
+    return handlers
+  }, [weekData, jumpToDay, currentPhaseId, currentWeek, navigate])
 
   const completedSet = useMemo(
     () =>
@@ -104,164 +234,120 @@ function DashboardPage() {
     return [...groups]
   }, [currentDay])
 
-  // Weekly volume: total sets per muscle group this week
-  const weeklyVolume = useMemo(() => {
-    const volume = {}
+  const dashboardAnalytics = useMemo(() => {
+    const weekVolumeByGroup = {}
+    const recoveryVolumeByGroup = {}
+    const uniqueDayKeys = []
+    const exerciseHistory = {}
+    const cutoff = Date.now() - RECOVERY_WINDOW_MS
+
     completedDays.forEach((entry) => {
-      if (entry.phaseId !== currentPhaseId || entry.week !== currentWeek) return
-      entry.exercises?.forEach((ex) => {
-        const group = ex.muscleGroup || 'Other'
-        const setCount = ex.sets?.length || 1
-        volume[group] = (volume[group] || 0) + setCount
+      const dayKey = toDateOnly(entry.date)
+      const dayTimestamp = dayKey ? new Date(dayKey).getTime() : NaN
+      if (!Number.isFinite(dayTimestamp)) return
+
+      uniqueDayKeys.push(dayKey)
+
+      const isCurrentWeek = entry.phaseId === currentPhaseId && Number(entry.week) === Number(currentWeek)
+      const isInRecoveryWindow = dayTimestamp > cutoff
+
+      ;(entry.exercises || []).forEach((exercise) => {
+        const setCount = Array.isArray(exercise?.sets) && exercise.sets.length > 0
+          ? exercise.sets.length
+          : 1
+
+        if (isCurrentWeek) {
+          const group = exercise?.muscleGroup || 'Other'
+          weekVolumeByGroup[group] = (weekVolumeByGroup[group] || 0) + setCount
+        }
+
+        if (isInRecoveryWindow) {
+          const recoveryGroup = toRecoveryGroup(exercise?.muscleGroup)
+          if (recoveryGroup) {
+            recoveryVolumeByGroup[recoveryGroup] = (recoveryVolumeByGroup[recoveryGroup] || 0) + setCount
+          }
+        }
+
+        if (!exercise?.name) return
+
+        const topSet = getTopSetWithRpe(exercise)
+        if (!topSet) return
+
+        if (!exerciseHistory[exercise.name]) exerciseHistory[exercise.name] = []
+        exerciseHistory[exercise.name].push({
+          date: entry.date,
+          name: exercise.name,
+          topSet,
+        })
       })
     })
-    // Sort by volume descending
-    return Object.entries(volume).sort((a, b) => b[1] - a[1])
-  }, [completedDays, currentPhaseId, currentWeek])
 
-  const streakStats = useMemo(() => {
-    const uniqueDays = [...new Set(completedDays.map((entry) => new Date(entry.date).toISOString().split('T')[0]))]
-      .map((day) => new Date(day))
-      .sort((a, b) => a.getTime() - b.getTime())
+    const weeklyVolume = Object.entries(weekVolumeByGroup).sort((a, b) => b[1] - a[1])
+    const weeklyVolumeMax = weeklyVolume.length > 0
+      ? Math.max(...weeklyVolume.map(([, sets]) => sets))
+      : 1
 
-    if (uniqueDays.length === 0) {
-      return { current: 0, best: 0 }
-    }
-
-    const oneDayMs = 24 * 60 * 60 * 1000
-    let best = 1
-    let run = 1
-
-    for (let i = 1; i < uniqueDays.length; i++) {
-      const diff = Math.round((uniqueDays[i].getTime() - uniqueDays[i - 1].getTime()) / oneDayMs)
-      if (diff === 1) {
-        run += 1
-        best = Math.max(best, run)
-      } else {
-        run = 1
-      }
-    }
-
-    let current = 1
-    for (let i = uniqueDays.length - 1; i > 0; i--) {
-      const diff = Math.round((uniqueDays[i].getTime() - uniqueDays[i - 1].getTime()) / oneDayMs)
-      if (diff === 1) current += 1
-      else break
-    }
-
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const latest = new Date(uniqueDays[uniqueDays.length - 1])
-    latest.setHours(0, 0, 0, 0)
-    const daysSinceLatest = Math.round((today.getTime() - latest.getTime()) / oneDayMs)
-
-    if (daysSinceLatest > 1) {
-      current = 0
-    }
-
-    return { current, best }
-  }, [completedDays])
-
-  // Recovery Heatmap (last 48 hours)
-  const recoveryStatus = useMemo(() => {
-    const volume = {}
-    const fortyEightMs = 48 * 60 * 60 * 1000
-    const cutoff = Date.now() - fortyEightMs
-
-    completedDays.forEach(day => {
-      if (new Date(day.date).getTime() > cutoff) {
-        day.exercises?.forEach(ex => {
-          if (!ex.muscleGroup) return
-          let group = ex.muscleGroup
-          // Simplify for a high-level overview
-          if (['Quads', 'Hamstrings', 'Glutes', 'Calves'].includes(group)) group = 'Legs'
-          if (['Biceps', 'Triceps'].includes(group)) group = 'Arms'
-          
-          volume[group] = (volume[group] || 0) + (ex.sets?.length || 1)
-        })
-      }
-    })
-
-    const displayGroups = ['Chest', 'Back', 'Shoulders', 'Legs', 'Arms', 'Core']
-    return displayGroups.map(group => {
-      const sets = volume[group] || 0
+    const recoveryStatus = RECOVERY_DISPLAY_GROUPS.map((group) => {
+      const sets = recoveryVolumeByGroup[group] || 0
       let status = 'Ready'
       let colorClass = 'bg-emerald-500'
       let textClass = 'text-emerald-700'
       let bgClass = 'bg-emerald-50'
       let borderClass = 'border-emerald-200'
-      
-      if (sets >= 10) { 
+
+      if (sets >= 10) {
         status = 'Exhausted'
         colorClass = 'bg-red-500'
         textClass = 'text-red-700'
         bgClass = 'bg-red-50'
         borderClass = 'border-red-200'
-      } else if (sets >= 4) { 
+      } else if (sets >= 4) {
         status = 'Recovering'
         colorClass = 'bg-amber-500'
         textClass = 'text-amber-800'
         bgClass = 'bg-amber-50'
         borderClass = 'border-amber-200'
       }
+
       return { group, sets, status, colorClass, textClass, bgClass, borderClass }
     })
-  }, [completedDays])
 
-  const trainingAlerts = useMemo(() => {
-    const byExercise = {}
-
-    const sorted = [...completedDays]
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-
-    sorted.forEach((day) => {
-      ;(day.exercises || []).forEach((exercise) => {
-        const name = exercise?.name
-        if (!name) return
-
-        const sets = Array.isArray(exercise?.sets) ? exercise.sets : []
-        let topSet = null
-
-        sets.forEach((set) => {
-          const weight = Number(set.weight) || 0
-          const reps = Number(set.reps) || 0
-          const rpe = Number(set.rpe)
-
-          if (!weight || !Number.isFinite(rpe)) return
-
-          if (!topSet || weight > topSet.weight || (weight === topSet.weight && reps > topSet.reps)) {
-            topSet = { weight, reps, rpe }
-          }
-        })
-
-        if (!topSet) return
-
-        if (!byExercise[name]) byExercise[name] = []
-        byExercise[name].push({
-          date: day.date,
-          name,
-          topSet,
-        })
-      })
-    })
-
-    return Object.keys(byExercise)
+    const rawTrainingAlerts = Object.keys(exerciseHistory)
       .map((exerciseName) => {
-        const history = byExercise[exerciseName]
-        const result = analyzeRPETrend(history)
+        const result = analyzeRPETrend(exerciseHistory[exerciseName])
         if (!result.hasAlert) return null
 
-        const alertId = `rpe:${exerciseName.toLowerCase()}`
         return {
-          id: alertId,
+          id: `rpe:${exerciseName.toLowerCase()}`,
           exerciseName,
           severity: result.severity,
           message: result.message,
         }
       })
       .filter(Boolean)
-      .filter((alert) => !dismissedAlerts.includes(alert.id))
-  }, [completedDays, dismissedAlerts])
+
+    return {
+      weeklyVolume,
+      weeklyVolumeMax,
+      streakStats: computeStreakStats(uniqueDayKeys),
+      recoveryStatus,
+      rawTrainingAlerts,
+    }
+  }, [completedDays, currentPhaseId, currentWeek])
+
+  const trainingAlerts = useMemo(() => {
+    const alerts = dashboardAnalytics.rawTrainingAlerts
+    if (!Array.isArray(alerts) || alerts.length === 0) return []
+    if (!Array.isArray(dismissedAlerts) || dismissedAlerts.length === 0) return alerts
+
+    const dismissedSet = new Set(dismissedAlerts)
+    return alerts.filter((alert) => !dismissedSet.has(alert.id))
+  }, [dashboardAnalytics.rawTrainingAlerts, dismissedAlerts])
+
+  const weeklyVolume = dashboardAnalytics.weeklyVolume
+  const weeklyVolumeMax = dashboardAnalytics.weeklyVolumeMax
+  const streakStats = dashboardAnalytics.streakStats
+  const recoveryStatus = dashboardAnalytics.recoveryStatus
 
   return (
     <div className="mx-auto grid max-w-6xl gap-5 px-4 py-6">
@@ -302,6 +388,18 @@ function DashboardPage() {
               className="rounded-full bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700"
             >
               Start Workout
+            </Link>
+            <Link
+              to="/tools"
+              className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
+            >
+              Workout Tools
+            </Link>
+            <Link
+              to="/records"
+              className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100"
+            >
+              Records and Goals
             </Link>
             <Link
               to="/history"
@@ -383,7 +481,7 @@ function DashboardPage() {
                 <div className="flex-1 h-2 rounded-full bg-zinc-100 overflow-hidden">
                   <div
                     className="h-full rounded-full bg-zinc-800 transition-all"
-                    style={{ width: `${Math.min((sets / Math.max(...weeklyVolume.map(v => v[1]))) * 100, 100)}%` }}
+                    style={{ width: `${Math.min((sets / weeklyVolumeMax) * 100, 100)}%` }}
                   />
                 </div>
                 <span className="text-xs font-medium text-zinc-600 w-8 text-right">{sets}</span>
@@ -409,7 +507,7 @@ function DashboardPage() {
 
             <div className="min-w-0">
               <h2 className="truncate text-lg font-semibold text-zinc-900">Week {currentWeek} Plan</h2>
-              <p className="text-sm text-zinc-500">Tap any day to jump</p>
+              <p className="text-sm text-zinc-500">Tap any day to jump, double-click to open workout</p>
             </div>
 
             <button
@@ -440,22 +538,26 @@ function DashboardPage() {
               day={day}
               isActive={day.dayIndex === currentDayIndex}
               isCompleted={completedSet.has(`${currentPhaseId}-${currentWeek}-${day.dayIndex}`)}
-              onClick={() => jumpToDay(currentPhaseId, currentWeek, day.dayIndex)}
+              onClick={daySelectHandlers[day.dayIndex]}
+              onDoubleClick={dayStartHandlers[day.dayIndex]}
             />
           ))}
         </div>
-
-        <div className="mt-3 flex justify-end">
-          <Link
-            to="/workout"
-            className="w-full sm:w-auto rounded-full bg-zinc-900 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-zinc-700"
-          >
-            Start Selected Day Workout
-          </Link>
-        </div>
       </section>
 
-      {showCalendar && <CalendarModal onClose={() => setShowCalendar(false)} />}
+      {showCalendar && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+              <div className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-zinc-700 shadow-lg">
+                Loading calendar...
+              </div>
+            </div>
+          }
+        >
+          <CalendarModal onClose={() => setShowCalendar(false)} />
+        </Suspense>
+      )}
     </div>
   )
 }

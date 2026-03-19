@@ -192,6 +192,9 @@ function DriveBackup() {
       <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
         Fitty stores backup files in a Google Drive folder called "Fitty Backups".
       </p>
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        Your 5 most recent automatic backup files are stored within Google Drive and older automatic backups are deleted to save space.
+      </p>
 
       {currentStatus && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">

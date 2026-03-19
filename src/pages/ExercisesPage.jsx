@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { enqueueMutation } from '../utils/syncQueue'
 import { useAuth } from '../components/AuthProvider'
@@ -383,6 +384,14 @@ function ExercisesPage() {
       <div>
         <h1 className="text-2xl font-bold text-zinc-900">Exercise Library</h1>
         <p className="mt-1 text-sm text-zinc-500">Browse exercises by muscle group · edit categorization</p>
+        <div className="mt-3">
+          <Link
+            to="/records"
+            className="inline-flex rounded-full border border-zinc-300 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+          >
+            Open Records and Goals
+          </Link>
+        </div>
       </div>
 
       {/* Tabs */}

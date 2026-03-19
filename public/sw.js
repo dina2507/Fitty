@@ -1,9 +1,29 @@
-const CACHE_NAME = 'fitty-cache-v1'
-const CORE_ASSETS = ['/', '/index.html', '/manifest.json']
+const APP_SHELL_CACHE = 'fitty-app-shell-v2'
+const RUNTIME_CACHE = 'fitty-runtime-v2'
+const CORE_ASSETS = [
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/icons/icon.svg',
+  '/icons/maskable.svg',
+]
+
+function isHttpRequest(request) {
+  return request?.url?.startsWith('http://') || request?.url?.startsWith('https://')
+}
+
+function isSameOriginRequest(request) {
+  try {
+    const requestUrl = new URL(request.url)
+    return requestUrl.origin === self.location.origin
+  } catch {
+    return false
+  }
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined),
+    caches.open(APP_SHELL_CACHE).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined),
   )
   self.skipWaiting()
 })
@@ -13,7 +33,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => {
       return Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME)
+          .filter((key) => ![APP_SHELL_CACHE, RUNTIME_CACHE].includes(key))
           .map((key) => caches.delete(key)),
       )
     }),
@@ -23,30 +43,52 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
+  if (!isHttpRequest(event.request)) return
+  if (!isSameOriginRequest(event.request)) return
 
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
-        .then((response) => response)
+        .then((response) => {
+          const responseClone = response.clone()
+          caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, responseClone))
+          return response
+        })
         .catch(() => caches.match('/index.html')),
     )
     return
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached
+  const isStaticAsset = ['style', 'script', 'image', 'font', 'manifest'].includes(event.request.destination)
 
-      return fetch(event.request)
-        .then((response) => {
+  if (isStaticAsset) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        const networkFetch = fetch(event.request)
+          .then((response) => {
+            if (response?.ok) {
+              const clone = response.clone()
+              caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, clone))
+            }
+            return response
+          })
+          .catch(() => cached)
+
+        return cached || networkFetch
+      }),
+    )
+    return
+  }
+
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        if (response?.ok) {
           const clone = response.clone()
-          // Only cache http/https requests, skip chrome-extension and other schemes
-          if (event.request.url.startsWith('http')) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
-          }
-          return response
-        })
-        .catch(() => cached)
-    }),
+          caches.open(RUNTIME_CACHE).then((cache) => cache.put(event.request, clone))
+        }
+        return response
+      })
+      .catch(() => caches.match(event.request)),
   )
 })

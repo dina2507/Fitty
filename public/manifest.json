@@ -1,22 +1,40 @@
 {
   "name": "Fitty - PPL Tracker",
   "short_name": "Fitty",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "background_color": "#f4f4f5",
   "theme_color": "#18181b",
   "description": "A comprehensive push-pull-legs workout tracking application.",
   "icons": [
     {
-      "src": "/vite.svg",
-      "sizes": "192x192",
+      "src": "/icons/icon.svg",
+      "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "/vite.svg",
-      "sizes": "512x512",
-      "type": "image/svg+xml"
+      "src": "/icons/maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Start Workout",
+      "short_name": "Workout",
+      "url": "/workout",
+      "description": "Jump straight into your current session"
+    },
+    {
+      "name": "View History",
+      "short_name": "History",
+      "url": "/history",
+      "description": "Review previous workouts"
     }
   ]
 }

@@ -552,20 +552,29 @@ function StatsPage() {
           <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="text-sm font-semibold text-zinc-800">PR Progress per Exercise</h3>
-              <select
-                value={selectedExercise}
-                onChange={(e) => setSelectedExercise(e.target.value)}
-                disabled={exerciseOptions.length === 0}
-                className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 outline-none focus:border-zinc-400"
-              >
-                {exerciseOptions.length === 0 ? (
-                  <option value="">No exercises yet</option>
-                ) : (
-                  exerciseOptions.map((name) => (
-                    <option key={name} value={name}>{name}</option>
-                  ))
-                )}
-              </select>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate('/records')}
+                  className="rounded-full border border-zinc-300 px-3 py-1.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-100"
+                >
+                  Open Records and Goals
+                </button>
+                <select
+                  value={selectedExercise}
+                  onChange={(e) => setSelectedExercise(e.target.value)}
+                  disabled={exerciseOptions.length === 0}
+                  className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 outline-none focus:border-zinc-400"
+                >
+                  {exerciseOptions.length === 0 ? (
+                    <option value="">No exercises yet</option>
+                  ) : (
+                    exerciseOptions.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))
+                  )}
+                </select>
+              </div>
             </div>
 
             <div className="h-64 w-full">

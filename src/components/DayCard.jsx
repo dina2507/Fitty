@@ -1,6 +1,7 @@
+import { memo } from 'react'
 import { getDayTheme } from '../utils/dayTheme'
 
-function DayCard({ day, isActive = false, isCompleted = false, onClick }) {
+function DayCard({ day, isActive = false, isCompleted = false, onClick, onDoubleClick }) {
   if (!day) {
     return null
   }
@@ -11,6 +12,7 @@ function DayCard({ day, isActive = false, isCompleted = false, onClick }) {
     <button
       type="button"
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       className={[
         'w-full rounded-xl border p-4 text-left transition-all',
         `bg-gradient-to-br ${theme.surface}`,
@@ -39,7 +41,7 @@ function DayCard({ day, isActive = false, isCompleted = false, onClick }) {
       </p>
 
       <div className="mt-3 flex items-center justify-between">
-        <span className="text-xs text-zinc-500">Tap to select day</span>
+        <span className="text-xs text-zinc-500">Tap to select · Double-click to start</span>
         {isCompleted && (
           <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
             Completed
@@ -50,4 +52,4 @@ function DayCard({ day, isActive = false, isCompleted = false, onClick }) {
   )
 }
 
-export default DayCard
+export default memo(DayCard)
