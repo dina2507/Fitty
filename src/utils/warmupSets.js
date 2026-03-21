@@ -7,19 +7,61 @@ function roundToNearest(value, increment = 2.5) {
   return Math.round(value / increment) * increment
 }
 
-export function generateWarmupSets(workingWeight, unit = 'kg') {
+function parseBaseReps(repsValue) {
+  const parsed = String(repsValue || '').match(/\d+/)
+  const firstNumber = parsed ? Number(parsed[0]) : NaN
+  if (!Number.isFinite(firstNumber) || firstNumber <= 0) return 8
+  return firstNumber
+}
+
+export function parseWarmupSetCount(rawWarmupSets) {
+  if (rawWarmupSets === null || rawWarmupSets === undefined) return 3
+
+  const normalized = String(rawWarmupSets).trim()
+  if (!normalized) return 3
+
+  const leading = normalized.match(/\d+/)
+  const parsed = leading ? Number(leading[0]) : NaN
+  if (!Number.isFinite(parsed)) return 3
+
+  return clamp(parsed, 0, 3)
+}
+
+function buildWarmupTemplate(warmupSetCount, workingReps) {
+  const topReps = parseBaseReps(workingReps)
+  const midReps = Math.max(1, topReps - 3)
+  const lowReps = Math.max(1, topReps - 5)
+
+  if (warmupSetCount <= 0) return []
+  if (warmupSetCount === 1) {
+    return [{ percent: 0.6, reps: topReps }]
+  }
+  if (warmupSetCount === 2) {
+    return [
+      { percent: 0.5, reps: topReps },
+      { percent: 0.7, reps: midReps },
+    ]
+  }
+
+  return [
+    { percent: 0.45, reps: topReps },
+    { percent: 0.65, reps: midReps },
+    { percent: 0.85, reps: lowReps },
+  ]
+}
+
+export function generateWarmupSets(workingWeight, unit = 'kg', options = {}) {
   const parsed = Number(workingWeight)
   if (!Number.isFinite(parsed) || parsed <= 0) return []
+
+  const { warmupSets: rawWarmupSets, workingReps } = options
+  const warmupSetCount = parseWarmupSetCount(rawWarmupSets)
+  if (warmupSetCount <= 0) return []
 
   const minStep = unit === 'lbs' ? 5 : 2.5
   const normalized = Math.max(minStep, roundToNearest(parsed, minStep))
 
-  const template = [
-    { percent: 0.45, reps: 8 },
-    { percent: 0.6, reps: 5 },
-    { percent: 0.75, reps: 3 },
-    { percent: 0.85, reps: 1 },
-  ]
+  const template = buildWarmupTemplate(warmupSetCount, workingReps)
 
   return template
     .map((step, idx) => {

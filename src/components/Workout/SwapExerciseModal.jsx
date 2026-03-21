@@ -7,6 +7,9 @@ export function SwapExerciseModal({ exercise, onSwap, onClose }) {
   const [activeTab, setActiveTab] = useState('subs')
   const [searchQuery, setSearchQuery] = useState('')
 
+  const normalizeName = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  const normalizeLooseName = (value) => normalizeName(value).replace(/\s*\([^)]*\)\s*/g, ' ')
+
   const allProgramExercises = useMemo(() => {
     const map = new Map()
     ;(program?.phases || []).forEach((phase) => {
@@ -25,12 +28,48 @@ export function SwapExerciseModal({ exercise, onSwap, onClose }) {
 
   const findByName = (name) => allProgramExercises.find((item) => item.name === name)
 
+  const findByNameLoose = (name) => {
+    const target = normalizeName(name)
+    const targetLoose = normalizeLooseName(name)
+
+    return allProgramExercises.find((item) => {
+      const itemExact = normalizeName(item.name)
+      if (itemExact === target) return true
+      const itemLoose = normalizeLooseName(item.name)
+      return itemLoose === targetLoose
+    })
+  }
+
+  const buildFallbackSubstitute = (name) => ({
+    id: `sub_fallback_${normalizeName(name).replace(/[^a-z0-9]+/g, '_')}`,
+    name,
+    muscleGroup: exercise.muscleGroup,
+    workingSets: exercise.workingSets || 3,
+    reps: exercise.reps || '8-10',
+    rpe: exercise.rpe || '8-9',
+    rest: exercise.rest || '~2 min',
+    warmupSets: exercise.warmupSets || '0',
+    notes: '',
+    sub1: '',
+    sub2: '',
+  })
+
   const directSubstitutes = useMemo(() => {
+    const seen = new Set()
+
     return [exercise.sub1, exercise.sub2]
       .filter((name) => name && name !== 'N/A')
-      .map((name) => findByName(name))
-      .filter(Boolean)
-  }, [exercise])
+      .map((name) => {
+        const matched = findByName(name) || findByNameLoose(name)
+        return matched || buildFallbackSubstitute(name)
+      })
+      .filter((item) => {
+        const key = normalizeName(item.name)
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+  }, [allProgramExercises, exercise])
 
   const sameMuscleSuggestions = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()

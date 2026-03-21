@@ -5,9 +5,11 @@ import MuscleGroupBadge from '../MuscleGroupBadge'
 import { MUSCLE_GROUPS } from '../../utils/muscleGroups'
 import { generateId } from '../../utils/workoutHelpers'
 import { useWorkoutStore } from '../../store/useWorkoutStore'
+import { storage } from '../../utils/storage'
 
 export function AddExerciseModal({ onAdd, onClose, activeIds }) {
   const { user } = useAuth()
+  const userId = user?.id || null
   const program = useWorkoutStore((state) => state.program)
   const [searchQuery, setSearchQuery] = useState('')
   const [tab, setTab] = useState('program') // program | custom | create
@@ -40,17 +42,29 @@ export function AddExerciseModal({ onAdd, onClose, activeIds }) {
   }, [program])
 
   useEffect(() => {
-    if (user) fetchCustomExercises()
-  }, [user])
+    fetchCustomExercises()
+  }, [userId])
 
   const fetchCustomExercises = async () => {
     setLoading(true)
+
+    if (!navigator.onLine || !userId) {
+      setCustomExercises(storage.getCustomExercises())
+      setLoading(false)
+      return
+    }
+
     const { data } = await supabase
       .from('custom_exercises')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .order('name')
-    if (data) setCustomExercises(data)
+    if (data) {
+      setCustomExercises(data)
+      storage.saveCustomExercises(data)
+    } else {
+      setCustomExercises(storage.getCustomExercises())
+    }
     setLoading(false)
   }
 

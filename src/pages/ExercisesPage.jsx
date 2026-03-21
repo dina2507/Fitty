@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
 import { enqueueMutation } from '../utils/syncQueue'
+import { storage } from '../utils/storage'
 import { useAuth } from '../components/AuthProvider'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import { MUSCLE_GROUPS, getMuscleGroupColor } from '../utils/muscleGroups'
@@ -194,6 +195,7 @@ function ExerciseFormModal({ exercise, onSave, onClose }) {
 // ── Main Page ──
 function ExercisesPage() {
   const { user } = useAuth()
+  const userId = user?.id || null
   const program = useWorkoutStore((state) => state.program)
   const completedDays = useWorkoutStore((state) => state.completedDays)
   const planDisplayName = useWorkoutStore((state) => state.planDisplayName)
@@ -217,17 +219,70 @@ function ExercisesPage() {
   const jeffExercises = useMemo(() => getJeffExercises(program, overrides), [program, overrides])
 
   useEffect(() => {
-    if (user) fetchCustomExercises()
-  }, [user])
+    fetchCustomExercises()
+  }, [userId])
+
+  const buildLocalExercise = (form, exerciseId) => {
+    const secondaryMuscles = form.sub_muscle_group ? [form.sub_muscle_group] : []
+    return {
+      id: exerciseId || `local_ex_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      user_id: userId,
+      name: form.name,
+      muscle_group: form.muscle_group,
+      secondary_muscles: secondaryMuscles,
+      equipment: form.equipment,
+      default_sets: form.default_sets,
+      default_reps: form.default_reps,
+      default_rpe: form.default_rpe,
+      default_rest: form.default_rest,
+      notes: form.notes,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+  }
+
+  const upsertLocalExercise = (record) => {
+    const existing = storage.getCustomExercises()
+    const index = existing.findIndex((item) => item.id === record.id)
+    let next
+    if (index >= 0) {
+      next = [...existing]
+      next[index] = { ...existing[index], ...record, updated_at: new Date().toISOString() }
+    } else {
+      next = [record, ...existing]
+    }
+    storage.saveCustomExercises(next)
+    setCustomExercises(next)
+  }
+
+  const removeLocalExercise = (exerciseId) => {
+    const next = storage.getCustomExercises().filter((item) => item.id !== exerciseId)
+    storage.saveCustomExercises(next)
+    setCustomExercises(next)
+  }
 
   const fetchCustomExercises = async () => {
     setLoadingCustom(true)
+
+    if (!navigator.onLine || !userId) {
+      setCustomExercises(storage.getCustomExercises())
+      setLoadingCustom(false)
+      return
+    }
+
     const { data, error } = await supabase
       .from('custom_exercises')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
-    if (!error && data) setCustomExercises(data)
+
+    if (!error && data) {
+      setCustomExercises(data)
+      storage.saveCustomExercises(data)
+    } else {
+      setCustomExercises(storage.getCustomExercises())
+    }
+
     setLoadingCustom(false)
   }
 
@@ -252,7 +307,7 @@ function ExercisesPage() {
   const handleSaveExercise = async (form) => {
     const secondary_muscles = form.sub_muscle_group ? [form.sub_muscle_group] : null
     const payload = {
-      user_id: user.id,
+      user_id: userId,
       name: form.name,
       muscle_group: form.muscle_group,
       secondary_muscles,
@@ -264,8 +319,12 @@ function ExercisesPage() {
       notes: form.notes,
     }
 
+    // Local-first fallback: always keep local copy current.
+    const localRecord = buildLocalExercise(form, editingExercise?.id)
+
     if (editingExercise) {
-      if (!navigator.onLine) {
+      if (!navigator.onLine || !userId) {
+        upsertLocalExercise(localRecord)
         enqueueMutation('custom_exercises', 'update', payload, { id: editingExercise.id })
       } else {
         const { error } = await supabase
@@ -273,36 +332,48 @@ function ExercisesPage() {
           .update(payload)
           .eq('id', editingExercise.id)
         if (error) {
+          upsertLocalExercise(localRecord)
           enqueueMutation('custom_exercises', 'update', payload, { id: editingExercise.id })
+        } else {
+          await fetchCustomExercises()
         }
       }
-      await fetchCustomExercises()
     } else {
-      if (!navigator.onLine) {
+      if (!navigator.onLine || !userId) {
+        upsertLocalExercise(localRecord)
         enqueueMutation('custom_exercises', 'insert', payload)
       } else {
         const { error } = await supabase.from('custom_exercises').insert(payload)
         if (error) {
+          upsertLocalExercise(localRecord)
           enqueueMutation('custom_exercises', 'insert', payload)
+        } else {
+          await fetchCustomExercises()
         }
       }
-      await fetchCustomExercises()
     }
+
+    if (!navigator.onLine || !userId) {
+      setCustomExercises(storage.getCustomExercises())
+    }
+
     setShowForm(false)
     setEditingExercise(null)
   }
 
   const handleDeleteExercise = async (id) => {
     if (!window.confirm('Delete this exercise?')) return
-    if (!navigator.onLine) {
+    if (!navigator.onLine || !userId) {
       enqueueMutation('custom_exercises', 'delete', null, { id })
-      setCustomExercises(prev => prev.filter(e => e.id !== id))
+      removeLocalExercise(id)
       return
     }
 
     const { error } = await supabase.from('custom_exercises').delete().eq('id', id)
     if (error) {
       enqueueMutation('custom_exercises', 'delete', null, { id })
+      removeLocalExercise(id)
+      return
     }
     setCustomExercises(prev => prev.filter(e => e.id !== id))
   }

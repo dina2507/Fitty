@@ -121,6 +121,8 @@ function WorkoutPage() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false)
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState([])
+  const [exerciseSaveState, setExerciseSaveState] = useState({})
+  const [recentlyRemovedExercise, setRecentlyRemovedExercise] = useState(null)
 
   const { checkAndAward } = useMilestones()
 
@@ -270,6 +272,7 @@ function WorkoutPage() {
 
       setActiveExercises(safeExercises)
       setExerciseLog(buildInitialLog(safeExercises))
+      setExerciseSaveState({})
       setSessionNotes('')
       setStartTime(Date.now())
       setElapsedSeconds(0)
@@ -287,6 +290,7 @@ function WorkoutPage() {
         if (parsed.isCustomTemplate && activeCustomTemplate && parsed.templateId === activeCustomTemplate.id) {
           setActiveExercises(parsed.activeExercises)
           setExerciseLog(parsed.exerciseLog)
+          setExerciseSaveState(parsed.exerciseSaveState || {})
           setSessionNotes(parsed.sessionNotes || '')
           if (parsed.startTime) setStartTime(parsed.startTime)
           else setStartTime(Date.now())
@@ -294,6 +298,7 @@ function WorkoutPage() {
         } else if (!parsed.isCustomTemplate && parsed.dayIndex === programDay?.dayIndex && parsed.phaseId === (todaysWorkout ? todaysWorkout.phaseId : currentPhaseId)) {
           setActiveExercises(parsed.activeExercises)
           setExerciseLog(parsed.exerciseLog)
+          setExerciseSaveState(parsed.exerciseSaveState || {})
           setSessionNotes(parsed.sessionNotes || '')
           if (parsed.startTime) setStartTime(parsed.startTime)
           else setStartTime(Date.now())
@@ -309,6 +314,7 @@ function WorkoutPage() {
         return { ...orig, ...ex, id: ex.exerciseId || orig.id }
       })
       setActiveExercises(fullExercises)
+      setExerciseSaveState({})
       const log = {}
       ;(todaysWorkout.exercises || []).forEach(ex => {
         log[ex.exerciseId || ex.id] = { sets: ex.sets || [], notes: ex.notes || '' }
@@ -324,6 +330,7 @@ function WorkoutPage() {
     } else if (programDay?.exercises && !activeCustomTemplate) {
       setActiveExercises([...programDay.exercises])
       setExerciseLog(buildInitialLog(programDay.exercises))
+      setExerciseSaveState({})
       setSessionNotes('')
       setStartTime(Date.now())
     }
@@ -417,26 +424,80 @@ function WorkoutPage() {
 
   // Auto-save to localStorage (debounced)
   const saveTimerRef = useRef(null)
+  const removeUndoTimerRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      if (removeUndoTimerRef.current) {
+        clearTimeout(removeUndoTimerRef.current)
+      }
+    }
+  }, [])
+
+  const buildAutosavePayload = useCallback(
+    (overrides = {}) => ({
+      isCustomTemplate: !!activeCustomTemplate,
+      templateId: activeCustomTemplate?.id,
+      phaseId: currentPhaseId,
+      week: currentWeek,
+      dayIndex: programDay?.dayIndex,
+      activeExercises,
+      exerciseLog,
+      sessionNotes,
+      startTime,
+      exerciseSaveState,
+      ...overrides,
+    }),
+    [activeCustomTemplate, activeExercises, currentPhaseId, currentWeek, exerciseLog, exerciseSaveState, programDay?.dayIndex, sessionNotes, startTime],
+  )
+
+  const persistAutosaveSnapshot = useCallback(
+    (overrides = {}) => {
+      if (activeCustomTemplate || (programDay && !programDay.isRest)) {
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(buildAutosavePayload(overrides)))
+      }
+    },
+    [activeCustomTemplate, buildAutosavePayload, programDay],
+  )
+
   useEffect(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       // Only auto-save if working out (either custom template OR active program day)
-      if (activeCustomTemplate || (programDay && !programDay.isRest)) {
-        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({
-          isCustomTemplate: !!activeCustomTemplate,
-          templateId: activeCustomTemplate?.id,
-          phaseId: currentPhaseId,
-          week: currentWeek,
-          dayIndex: programDay?.dayIndex,
-          activeExercises,
-          exerciseLog,
-          sessionNotes,
-          startTime,
-        }))
-      }
+      persistAutosaveSnapshot()
     }, 500)
     return () => clearTimeout(saveTimerRef.current)
-  }, [activeExercises, exerciseLog, sessionNotes, startTime, activeCustomTemplate, currentPhaseId, currentWeek, programDay])
+  }, [activeExercises, exerciseLog, sessionNotes, startTime, activeCustomTemplate, currentPhaseId, currentWeek, programDay, persistAutosaveSnapshot])
+
+  const markExerciseUnsaved = useCallback((exerciseId) => {
+    if (!exerciseId) return
+    setExerciseSaveState((prev) => {
+      if (!prev[exerciseId]) return prev
+      return {
+        ...prev,
+        [exerciseId]: {
+          ...prev[exerciseId],
+          isSaved: false,
+        },
+      }
+    })
+  }, [])
+
+  const saveExerciseProgress = useCallback((exerciseId) => {
+    if (!exerciseId) return
+    const savedAt = new Date().toISOString()
+    setExerciseSaveState((prev) => {
+      const next = {
+        ...prev,
+        [exerciseId]: {
+          isSaved: true,
+          savedAt,
+        },
+      }
+      persistAutosaveSnapshot({ exerciseSaveState: next })
+      return next
+    })
+  }, [persistAutosaveSnapshot])
 
   // ── Set CRUD ──
   const addSet = useCallback((exerciseId) => {
@@ -452,7 +513,8 @@ function WorkoutPage() {
         },
       }
     })
-  }, [])
+    markExerciseUnsaved(exerciseId)
+  }, [markExerciseUnsaved])
 
   const removeSet = useCallback((exerciseId, setIndex) => {
     setExerciseLog((prev) => {
@@ -466,7 +528,8 @@ function WorkoutPage() {
         [exerciseId]: { ...current, sets: updated },
       }
     })
-  }, [])
+    markExerciseUnsaved(exerciseId)
+  }, [markExerciseUnsaved])
 
   const updateSet = useCallback((exerciseId, setIndex, field, value) => {
     setExerciseLog((prev) => {
@@ -480,7 +543,8 @@ function WorkoutPage() {
         [exerciseId]: { ...current, sets: updatedSets },
       }
     })
-  }, [])
+    markExerciseUnsaved(exerciseId)
+  }, [markExerciseUnsaved])
 
   // Swap exercise at a given index
   const swapExercise = useCallback((index, newExercise, isPermanent) => {
@@ -508,6 +572,11 @@ function WorkoutPage() {
       }
       return updated
     })
+    setExerciseSaveState((prev) => {
+      const next = { ...prev }
+      if (oldId) delete next[oldId]
+      return next
+    })
     setSwapExerciseIndex(null)
   }, [activeExercises, programDay])
 
@@ -516,17 +585,76 @@ function WorkoutPage() {
       ...prev,
       [exerciseId]: { ...prev[exerciseId], notes },
     }))
-  }, [])
+    markExerciseUnsaved(exerciseId)
+  }, [markExerciseUnsaved])
 
   // ── Exercise CRUD ──
   const removeExercise = useCallback((exerciseId) => {
+    const removedIndex = activeExercises.findIndex((item) => item.id === exerciseId)
+    const removedExercise = removedIndex >= 0 ? activeExercises[removedIndex] : null
+    if (!removedExercise) return
+    const removedLog = exerciseLog[exerciseId] || null
+    const removedSaveState = exerciseSaveState[exerciseId] || null
+
     setActiveExercises((prev) => prev.filter((e) => e.id !== exerciseId))
     setExerciseLog((prev) => {
       const updated = { ...prev }
       delete updated[exerciseId]
       return updated
     })
-  }, [])
+    setExerciseSaveState((prev) => {
+      const updated = { ...prev }
+      delete updated[exerciseId]
+      return updated
+    })
+
+    const nextRemoved = {
+      index: removedIndex,
+      exercise: removedExercise,
+      log: removedLog,
+      saveState: removedSaveState,
+    }
+    setRecentlyRemovedExercise(nextRemoved)
+
+    if (removeUndoTimerRef.current) {
+      clearTimeout(removeUndoTimerRef.current)
+    }
+    removeUndoTimerRef.current = setTimeout(() => {
+      setRecentlyRemovedExercise(null)
+    }, 10000)
+  }, [activeExercises, exerciseLog, exerciseSaveState])
+
+  const undoRemoveExercise = useCallback(() => {
+    if (!recentlyRemovedExercise?.exercise) return
+
+    const restore = recentlyRemovedExercise
+
+    setActiveExercises((prev) => {
+      const next = [...prev]
+      const insertAt = Math.max(0, Math.min(restore.index, next.length))
+      next.splice(insertAt, 0, restore.exercise)
+      return next
+    })
+
+    if (restore.log) {
+      setExerciseLog((prev) => ({
+        ...prev,
+        [restore.exercise.id]: restore.log,
+      }))
+    }
+
+    if (restore.saveState) {
+      setExerciseSaveState((prev) => ({
+        ...prev,
+        [restore.exercise.id]: restore.saveState,
+      }))
+    }
+
+    setRecentlyRemovedExercise(null)
+    if (removeUndoTimerRef.current) {
+      clearTimeout(removeUndoTimerRef.current)
+    }
+  }, [recentlyRemovedExercise])
 
   const addExerciseToSession = useCallback((exercise) => {
     setActiveExercises((prev) => [...prev, exercise])
@@ -542,6 +670,11 @@ function WorkoutPage() {
         notes: '',
       },
     }))
+    setExerciseSaveState((prev) => {
+      const next = { ...prev }
+      delete next[exercise.id]
+      return next
+    })
     setShowAddModal(false)
   }, [])
 
@@ -565,6 +698,7 @@ function WorkoutPage() {
     localStorage.removeItem(AUTOSAVE_KEY)
     setActiveExercises([])
     setExerciseLog({})
+    setExerciseSaveState({})
     setSessionNotes('')
     setDismissedSuggestionIds([])
     setShowProgramDayPicker(false)
@@ -820,6 +954,7 @@ function WorkoutPage() {
     if (!fallbackProgramDay || fallbackProgramDay.isRest) {
       setActiveExercises([])
       setExerciseLog({})
+      setExerciseSaveState({})
       setSessionNotes('')
       setStartTime(Date.now())
       setSessionNotice('Back to your default day workout.')
@@ -852,6 +987,7 @@ function WorkoutPage() {
 
       setActiveExercises(fullExercises)
       setExerciseLog(restoredLog)
+      setExerciseSaveState({})
       setSessionNotes(todaysWorkout.sessionNotes || todaysWorkout.session_notes || '')
       if (todaysWorkout.duration_minutes) {
         setStartTime(Date.now() - todaysWorkout.duration_minutes * 60000)
@@ -865,6 +1001,7 @@ function WorkoutPage() {
     const nextExercises = [...(fallbackProgramDay.exercises || [])]
     setActiveExercises(nextExercises)
     setExerciseLog(buildInitialLog(nextExercises))
+    setExerciseSaveState({})
     setSessionNotes('')
     setStartTime(Date.now())
     setSessionNotice('Back to your default day workout.')
@@ -1009,6 +1146,21 @@ function WorkoutPage() {
         </div>
       )}
 
+      {recentlyRemovedExercise?.exercise && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span>{recentlyRemovedExercise.exercise.name} removed. You can restore it.</span>
+            <button
+              type="button"
+              onClick={undoRemoveExercise}
+              className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+            >
+              Undo
+            </button>
+          </div>
+        </div>
+      )}
+
       {(!activeCustomTemplate && programDay?.isRest) ? (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-xl font-semibold text-zinc-900">Rest Day</h2>
@@ -1122,6 +1274,8 @@ function WorkoutPage() {
                   : progressionSuggestions[exercise.id]
               }
               onDismissSuggestion={() => dismissProgressionSuggestion(exercise.id)}
+              exerciseSaveState={exerciseSaveState[exercise.id]}
+              onSaveExercise={saveExerciseProgress}
               superset={supersetMeta[exIndex]}
               setSwapExerciseIndex={setSwapExerciseIndex}
               onScheduleExercise={openScheduleExerciseModal}

@@ -17,6 +17,8 @@ export function ExerciseCard({
   superset,
   progressionSuggestion,
   onDismissSuggestion,
+  exerciseSaveState,
+  onSaveExercise,
   setSwapExerciseIndex,
   onScheduleExercise,
   moveExercise,
@@ -41,8 +43,11 @@ export function ExerciseCard({
   }, [firstSetWeight, previous?.weight])
 
   const warmupSets = React.useMemo(() => {
-    return generateWarmupSets(warmupReferenceWeight, weightUnit)
-  }, [warmupReferenceWeight, weightUnit])
+    return generateWarmupSets(warmupReferenceWeight, weightUnit, {
+      warmupSets: exercise.warmupSets,
+      workingReps: exercise.reps,
+    })
+  }, [warmupReferenceWeight, weightUnit, exercise.warmupSets, exercise.reps])
 
   const handleSetFieldChange = (setIdx, field, value) => {
     const currentSet = exerciseLog[exercise.id]?.sets?.[setIdx] || {}
@@ -117,6 +122,9 @@ export function ExerciseCard({
               {isPR && <PRBadge />}
               {exercise.isCustom && (
                 <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-600">Custom</span>
+              )}
+              {exerciseSaveState?.isSaved && (
+                <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">Saved</span>
               )}
             </div>
             <h3 className="mt-1 text-sm font-semibold text-zinc-900">{exercise.name}</h3>
@@ -261,6 +269,12 @@ export function ExerciseCard({
         ))}
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => onSaveExercise(exercise.id)}
+            className="rounded border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+          >
+            {exerciseSaveState?.isSaved ? 'Saved' : 'Save Exercise'}
+          </button>
           <button
             onClick={() => addSet(exercise.id)}
             className="rounded border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:border-zinc-400 hover:text-zinc-700"

@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   REST_TIMER_VIBRATION: 'ppl_tracker_rest_timer_vibration',
   DISMISSED_ALERTS: 'ppl_tracker_dismissed_alerts',
   EXERCISE_GOALS: 'ppl_tracker_exercise_goals',
+  CUSTOM_EXERCISES: 'ppl_tracker_custom_exercises',
 }
 
 export const storage = {
@@ -172,6 +173,21 @@ export const storage = {
     localStorage.setItem(STORAGE_KEYS.EXERCISE_GOALS, JSON.stringify(Array.isArray(goals) ? goals : []))
   },
 
+  getCustomExercises() {
+    const value = localStorage.getItem(STORAGE_KEYS.CUSTOM_EXERCISES)
+    if (!value) return []
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  },
+
+  saveCustomExercises(exercises) {
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_EXERCISES, JSON.stringify(Array.isArray(exercises) ? exercises : []))
+  },
+
   clearAll() {
     Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key))
   },
@@ -192,6 +208,7 @@ export const storage = {
       restTimerVibration: this.getRestTimerVibration(),
       dismissedAlerts: this.getDismissedAlerts(),
       exerciseGoals: this.getExerciseGoals(),
+      customExercises: this.getCustomExercises(),
     }
   },
 
@@ -217,6 +234,7 @@ export const storage = {
     if ('restTimerVibration' in data && typeof data.restTimerVibration === 'boolean') this.saveRestTimerVibration(data.restTimerVibration)
     if ('dismissedAlerts' in data) this.saveDismissedAlerts(Array.isArray(data.dismissedAlerts) ? data.dismissedAlerts : [])
     if ('exerciseGoals' in data) this.saveExerciseGoals(Array.isArray(data.exerciseGoals) ? data.exerciseGoals : [])
+    if ('customExercises' in data) this.saveCustomExercises(Array.isArray(data.customExercises) ? data.customExercises : [])
   }
 }
 
