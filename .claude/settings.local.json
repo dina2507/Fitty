@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"initializeStore\" /e/Fitty/src/store/slices/*.js)",
+      "Bash(npm run:*)"
+    ]
+  }
+}

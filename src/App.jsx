@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom'
 import AuthProvider from './components/AuthProvider'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -16,16 +16,38 @@ import StatsPage from './pages/StatsPage'
 import WorkoutToolsPage from './pages/WorkoutToolsPage'
 import PersonalRecordsPage from './pages/PersonalRecordsPage'
 import { useWorkoutStore } from './store/useWorkoutStore'
+import ErrorBoundary from './components/ErrorBoundary'
 
 function AppContent() {
   const initializeStore = useWorkoutStore((state) => state.initializeStore)
+  const [storageWarning, setStorageWarning] = useState(false)
 
   useEffect(() => {
     initializeStore()
   }, [initializeStore])
 
+  useEffect(() => {
+    const handler = () => setStorageWarning(true)
+    window.addEventListener('fitty:storage-quota-exceeded', handler)
+    return () => window.removeEventListener('fitty:storage-quota-exceeded', handler)
+  }, [])
+
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900">
+      {storageWarning && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-red-600 px-4 py-2 text-center text-sm font-medium text-white">
+          Storage full — some data could not be saved. Go to{' '}
+          <a href="/settings" className="underline">Settings</a> to free up space.
+          <button
+            type="button"
+            onClick={() => setStorageWarning(false)}
+            className="ml-3 opacity-70 hover:opacity-100"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <Header />
       <MilestoneToastHost />
       <main>
@@ -35,7 +57,9 @@ function AppContent() {
             path="/"
             element={
               <ProtectedRoute>
-                <DashboardPage />
+                <ErrorBoundary>
+                  <DashboardPage />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -43,7 +67,9 @@ function AppContent() {
             path="/workout"
             element={
               <ProtectedRoute>
-                <WorkoutPage />
+                <ErrorBoundary>
+                  <WorkoutPage />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -51,7 +77,9 @@ function AppContent() {
             path="/history"
             element={
               <ProtectedRoute>
-                <HistoryPage />
+                <ErrorBoundary>
+                  <HistoryPage />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -59,7 +87,9 @@ function AppContent() {
             path="/exercises"
             element={
               <ProtectedRoute>
-                <ExercisesPage />
+                <ErrorBoundary>
+                  <ExercisesPage />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -67,7 +97,9 @@ function AppContent() {
             path="/stats"
             element={
               <ProtectedRoute>
-                <StatsPage />
+                <ErrorBoundary>
+                  <StatsPage />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -75,7 +107,9 @@ function AppContent() {
             path="/program"
             element={
               <ProtectedRoute>
-                <ProgramPage />
+                <ErrorBoundary>
+                  <ProgramPage />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -83,15 +117,9 @@ function AppContent() {
             path="/builder"
             element={
               <ProtectedRoute>
-                <WorkoutBuilder />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/program"
-            element={
-              <ProtectedRoute>
-                <ProgramPage />
+                <ErrorBoundary>
+                  <WorkoutBuilder />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -99,7 +127,9 @@ function AppContent() {
             path="/settings"
             element={
               <ProtectedRoute>
-                <SettingsPage />
+                <ErrorBoundary>
+                  <SettingsPage />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -107,7 +137,9 @@ function AppContent() {
             path="/tools"
             element={
               <ProtectedRoute>
-                <WorkoutToolsPage />
+                <ErrorBoundary>
+                  <WorkoutToolsPage />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -115,7 +147,9 @@ function AppContent() {
             path="/records"
             element={
               <ProtectedRoute>
-                <PersonalRecordsPage />
+                <ErrorBoundary>
+                  <PersonalRecordsPage />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />

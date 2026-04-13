@@ -42,31 +42,39 @@ export function AddExerciseModal({ onAdd, onClose, activeIds }) {
   }, [program])
 
   useEffect(() => {
+    let cancelled = false
+
+    async function fetchCustomExercises() {
+      setLoading(true)
+
+      if (!navigator.onLine || !userId) {
+        if (!cancelled) {
+          setCustomExercises(storage.getCustomExercises())
+          setLoading(false)
+        }
+        return
+      }
+
+      const { data } = await supabase
+        .from('custom_exercises')
+        .select('*')
+        .eq('user_id', userId)
+        .order('name')
+
+      if (!cancelled) {
+        if (data) {
+          setCustomExercises(data)
+          storage.saveCustomExercises(data)
+        } else {
+          setCustomExercises(storage.getCustomExercises())
+        }
+        setLoading(false)
+      }
+    }
+
     fetchCustomExercises()
+    return () => { cancelled = true }
   }, [userId])
-
-  const fetchCustomExercises = async () => {
-    setLoading(true)
-
-    if (!navigator.onLine || !userId) {
-      setCustomExercises(storage.getCustomExercises())
-      setLoading(false)
-      return
-    }
-
-    const { data } = await supabase
-      .from('custom_exercises')
-      .select('*')
-      .eq('user_id', userId)
-      .order('name')
-    if (data) {
-      setCustomExercises(data)
-      storage.saveCustomExercises(data)
-    } else {
-      setCustomExercises(storage.getCustomExercises())
-    }
-    setLoading(false)
-  }
 
   const filteredProgram = useMemo(() => {
     return allProgramExercises.filter(ex => {
@@ -126,7 +134,7 @@ export function AddExerciseModal({ onAdd, onClose, activeIds }) {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
           <h3 className="text-base font-semibold text-zinc-900">Add Exercise</h3>
-          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-900 text-lg">×</button>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-zinc-400 hover:text-zinc-900 text-lg">×</button>
         </div>
 
         {/* Tabs */}

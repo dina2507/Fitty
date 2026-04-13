@@ -15,6 +15,12 @@ import { useWorkoutStore } from '../store/useWorkoutStore'
 export function CalendarModal({ onClose }) {
   const completedDays = useWorkoutStore((state) => state.completedDays)
 
+  React.useEffect(() => {
+    const handleKeyDown = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   // We map dates to their respective workout labels
   const workoutMap = useMemo(() => {
     const map = new Map()
@@ -51,8 +57,8 @@ export function CalendarModal({ onClose }) {
       <div className="w-full max-w-md rounded-2xl bg-white shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 bg-zinc-50">
           <h2 className="text-lg font-bold text-zinc-900">Workout Calendar</h2>
-          <button onClick={onClose} className="rounded-full bg-zinc-200 p-1.5 text-zinc-600 hover:bg-zinc-300">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          <button type="button" onClick={onClose} aria-label="Close calendar" className="rounded-full bg-zinc-200 p-1.5 text-zinc-600 hover:bg-zinc-300">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
 
@@ -66,7 +72,7 @@ export function CalendarModal({ onClose }) {
           </div>
 
           <div className="grid grid-cols-7 gap-1">
-            {calendarDays.map((day, i) => {
+            {calendarDays.map((day) => {
               const dateKey = format(day, 'yyyy-MM-dd')
               const workoutLabel = workoutMap.get(dateKey)
               const isCurrentMonth = isSameMonth(day, currentMonthStart)
@@ -86,7 +92,7 @@ export function CalendarModal({ onClose }) {
               }
 
               return (
-                <div key={i} className={dayBadgeClasses}>
+                <div key={dateKey} className={dayBadgeClasses}>
                   <span className={`text-[11px] font-semibold ${today ? 'text-zinc-900' : ''}`}>
                     {format(day, 'd')}
                   </span>

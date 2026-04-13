@@ -16,6 +16,29 @@ const STORAGE_KEYS = {
   CUSTOM_EXERCISES: 'ppl_tracker_custom_exercises',
 }
 
+function isQuotaError(e) {
+  return (
+    e instanceof DOMException &&
+    (e.code === 22 ||
+      e.code === 1014 ||
+      e.name === 'QuotaExceededError' ||
+      e.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+  )
+}
+
+function safeSetItem(key, value) {
+  try {
+    localStorage.setItem(key, value)
+  } catch (e) {
+    if (isQuotaError(e)) {
+      console.error(`LocalStorage quota exceeded while saving key "${key}".`)
+      window.dispatchEvent(new CustomEvent('fitty:storage-quota-exceeded', { detail: { key } }))
+    } else {
+      console.error(`Error saving key "${key}" to LocalStorage:`, e)
+    }
+  }
+}
+
 export const storage = {
   getProgress() {
     const data = localStorage.getItem(STORAGE_KEYS.PROGRESS)
@@ -23,7 +46,12 @@ export const storage = {
   },
 
   saveProgress(progress) {
-    localStorage.setItem(STORAGE_KEYS.PROGRESS, JSON.stringify(progress))
+    // Safeguard: prevent overwriting with null/empty if we already have progress
+    if (!progress && this.getProgress()) {
+      console.warn('Safeguard: Blocked attempt to overwrite existing progress with empty value.')
+      return
+    }
+    safeSetItem(STORAGE_KEYS.PROGRESS, JSON.stringify(progress))
   },
 
   getCompletedDays() {
@@ -32,7 +60,12 @@ export const storage = {
   },
 
   saveCompletedDays(days) {
-    localStorage.setItem(STORAGE_KEYS.COMPLETED_DAYS, JSON.stringify(days))
+    // Safeguard: prevent overwriting with empty array if we already have significant history
+    if ((!days || days.length === 0) && this.getCompletedDays().length > 0) {
+      console.warn('Safeguard: Blocked attempt to overwrite existing workout history with an empty list.')
+      return
+    }
+    safeSetItem(STORAGE_KEYS.COMPLETED_DAYS, JSON.stringify(days))
   },
 
   getProgramStart() {
@@ -40,7 +73,7 @@ export const storage = {
   },
 
   saveProgramStart(date) {
-    localStorage.setItem(STORAGE_KEYS.PROGRAM_START, date)
+    safeSetItem(STORAGE_KEYS.PROGRAM_START, date || '')
   },
 
   getBodyweightLogs() {
@@ -49,7 +82,7 @@ export const storage = {
   },
 
   saveBodyweightLogs(logs) {
-    localStorage.setItem(STORAGE_KEYS.BODYWEIGHT_LOGS, JSON.stringify(logs))
+    safeSetItem(STORAGE_KEYS.BODYWEIGHT_LOGS, JSON.stringify(logs))
   },
 
   getPlanDisplayName() {
@@ -59,7 +92,7 @@ export const storage = {
 
   savePlanDisplayName(name) {
     const normalized = String(name || '').trim() || 'Dina Workout plan'
-    localStorage.setItem(STORAGE_KEYS.PLAN_DISPLAY_NAME, normalized)
+    safeSetItem(STORAGE_KEYS.PLAN_DISPLAY_NAME, normalized)
   },
 
   getImportedPrograms() {
@@ -74,7 +107,7 @@ export const storage = {
   },
 
   saveImportedPrograms(programs) {
-    localStorage.setItem(
+    safeSetItem(
       STORAGE_KEYS.IMPORTED_PROGRAMS,
       JSON.stringify(Array.isArray(programs) ? programs : []),
     )
@@ -85,7 +118,7 @@ export const storage = {
   },
 
   saveActiveProgramId(programId) {
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_PROGRAM_ID, String(programId || 'built_in_default_program'))
+    safeSetItem(STORAGE_KEYS.ACTIVE_PROGRAM_ID, String(programId || 'built_in_default_program'))
   },
 
   getProgramCustomizations() {
@@ -94,7 +127,7 @@ export const storage = {
   },
 
   saveProgramCustomizations(customizations) {
-    localStorage.setItem(STORAGE_KEYS.PROGRAM_CUSTOMIZATIONS, JSON.stringify(customizations))
+    safeSetItem(STORAGE_KEYS.PROGRAM_CUSTOMIZATIONS, JSON.stringify(customizations))
   },
 
   getScheduledExercises() {
@@ -109,7 +142,7 @@ export const storage = {
   },
 
   saveScheduledExercises(items) {
-    localStorage.setItem(
+    safeSetItem(
       STORAGE_KEYS.SCHEDULED_EXERCISES,
       JSON.stringify(Array.isArray(items) ? items : []),
     )
@@ -120,7 +153,7 @@ export const storage = {
   },
 
   saveWeightUnit(unit) {
-    localStorage.setItem(STORAGE_KEYS.WEIGHT_UNIT, unit)
+    safeSetItem(STORAGE_KEYS.WEIGHT_UNIT, unit)
   },
 
   getRestTimerDefault() {
@@ -130,7 +163,7 @@ export const storage = {
   },
 
   saveRestTimerDefault(seconds) {
-    localStorage.setItem(STORAGE_KEYS.REST_TIMER_DEFAULT, String(seconds))
+    safeSetItem(STORAGE_KEYS.REST_TIMER_DEFAULT, String(seconds))
   },
 
   getRestTimerVibration() {
@@ -140,7 +173,7 @@ export const storage = {
   },
 
   saveRestTimerVibration(enabled) {
-    localStorage.setItem(STORAGE_KEYS.REST_TIMER_VIBRATION, String(Boolean(enabled)))
+    safeSetItem(STORAGE_KEYS.REST_TIMER_VIBRATION, String(Boolean(enabled)))
   },
 
   getDismissedAlerts() {
@@ -155,7 +188,7 @@ export const storage = {
   },
 
   saveDismissedAlerts(alertIds) {
-    localStorage.setItem(STORAGE_KEYS.DISMISSED_ALERTS, JSON.stringify(Array.isArray(alertIds) ? alertIds : []))
+    safeSetItem(STORAGE_KEYS.DISMISSED_ALERTS, JSON.stringify(Array.isArray(alertIds) ? alertIds : []))
   },
 
   getExerciseGoals() {
@@ -170,7 +203,7 @@ export const storage = {
   },
 
   saveExerciseGoals(goals) {
-    localStorage.setItem(STORAGE_KEYS.EXERCISE_GOALS, JSON.stringify(Array.isArray(goals) ? goals : []))
+    safeSetItem(STORAGE_KEYS.EXERCISE_GOALS, JSON.stringify(Array.isArray(goals) ? goals : []))
   },
 
   getCustomExercises() {
@@ -185,7 +218,7 @@ export const storage = {
   },
 
   saveCustomExercises(exercises) {
-    localStorage.setItem(STORAGE_KEYS.CUSTOM_EXERCISES, JSON.stringify(Array.isArray(exercises) ? exercises : []))
+    safeSetItem(STORAGE_KEYS.CUSTOM_EXERCISES, JSON.stringify(Array.isArray(exercises) ? exercises : []))
   },
 
   clearAll() {

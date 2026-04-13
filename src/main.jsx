@@ -41,6 +41,16 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>,
 )
 
+if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist().then((persistent) => {
+    if (persistent) {
+      console.log('Storage will not be cleared except by explicit user action');
+    } else {
+      console.warn('Storage may be cleared by the browser under pressure');
+    }
+  });
+}
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch((error) => {
