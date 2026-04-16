@@ -2,6 +2,8 @@
 
 Fitty is a modern strength training tracker focused on consistency, progression, and data reliability. It helps users follow structured workout programming, log training sessions quickly, track personal records, and analyze progress over time.
 
+URL : https://fitty-three.vercel.app/
+
 ## Highlights
 
 - Guided workout flow with day-by-day training structure
