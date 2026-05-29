@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { useAuth } from '../AuthProvider'
 import MuscleGroupBadge from '../MuscleGroupBadge'
@@ -12,6 +12,7 @@ export function AddExerciseModal({ onAdd, onClose, activeIds }) {
   const userId = user?.id || null
   const program = useWorkoutStore((state) => state.program)
   const [searchQuery, setSearchQuery] = useState('')
+  const deferredSearch = useDeferredValue(searchQuery)
   const [tab, setTab] = useState('program') // program | custom | create
   const [customExercises, setCustomExercises] = useState([])
   const [loading, setLoading] = useState(false)
@@ -79,17 +80,17 @@ export function AddExerciseModal({ onAdd, onClose, activeIds }) {
   const filteredProgram = useMemo(() => {
     return allProgramExercises.filter(ex => {
       if (activeIds.has(ex.id)) return false
-      if (!searchQuery) return true
-      return ex.name.toLowerCase().includes(searchQuery.toLowerCase())
+      if (!deferredSearch) return true
+      return ex.name.toLowerCase().includes(deferredSearch.toLowerCase())
     })
-  }, [allProgramExercises, searchQuery, activeIds])
+  }, [allProgramExercises, deferredSearch, activeIds])
 
   const filteredCustom = useMemo(() => {
     return customExercises.filter(ex => {
-      if (!searchQuery) return true
-      return ex.name.toLowerCase().includes(searchQuery.toLowerCase())
+      if (!deferredSearch) return true
+      return ex.name.toLowerCase().includes(deferredSearch.toLowerCase())
     })
-  }, [customExercises, searchQuery])
+  }, [customExercises, deferredSearch])
 
   const handleCreateAndAdd = () => {
     if (!newName.trim()) return

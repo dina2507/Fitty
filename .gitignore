@@ -15,6 +15,7 @@ dist
 .idea
 *.suo
 *.swp
+.claude
 
 # Environment
 .env
@@ -24,3 +25,10 @@ dist
 # OS
 .DS_Store
 Thumbs.db
+
+# Instructions
+AGENT_INSTRUCTIONS_V2.md
+workoutPlan.xlsx
+
+# Graphify knowledge-graph output (generated, not source code)
+graphify-out/

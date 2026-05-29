@@ -1,4 +1,4 @@
-import { storage } from '../../utils/storage'
+import { storage, SCHEMA_VERSION } from '../../utils/storage'
 import {
   CLOUD_SYNC_ENABLED,
   cloudSyncPromise,
@@ -279,6 +279,19 @@ export const createSyncSlice = (set, get) => ({
   },
 
   initializeStore: async () => {
+    // ── v2 migration: non-destructive, idempotent. Stamps schema version and
+    //    ensures activePlanId points at the active program for first-time v2 users. ──
+    if (storage.getSchemaVersion() !== SCHEMA_VERSION) {
+      if (!storage.getActivePlanId()) {
+        storage.saveActivePlanId(storage.getActiveProgramId())
+      }
+      storage.saveSchemaVersion(SCHEMA_VERSION)
+    }
+
+    const savedUserPlans = storage.getUserPlans()
+    const savedActivePlanId = storage.getActivePlanId() || storage.getActiveProgramId()
+    const savedActivePlanDayId = storage.getActivePlanDayId()
+
     const savedImportedPrograms = storage.getImportedPrograms()
     const savedActiveProgramId = storage.getActiveProgramId()
     const programLibrary = buildProgramLibrary(savedImportedPrograms)
@@ -302,6 +315,9 @@ export const createSyncSlice = (set, get) => ({
       program: activeProgram,
       programLibrary,
       activeProgramId: activeProgramEntry.id,
+      userPlans: Array.isArray(savedUserPlans) ? savedUserPlans : [],
+      activePlanId: savedActivePlanId,
+      activePlanDayId: savedActivePlanDayId,
     })
 
     if (savedStart) {

@@ -48,7 +48,7 @@ function WorkoutToolsPage() {
 
   return (
     <div className="mx-auto grid max-w-5xl gap-4 px-4 py-6">
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs uppercase tracking-wide text-zinc-500">Workout Tools</p>
@@ -82,7 +82,7 @@ function WorkoutToolsPage() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-zinc-900">Estimated 1RM</h2>
           <p className="mt-1 text-xs text-zinc-500">Uses the Epley formula from your best working set.</p>
 
@@ -118,7 +118,7 @@ function WorkoutToolsPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-zinc-900">Training Percentages</h2>
           <p className="mt-1 text-xs text-zinc-500">Quick reference from your estimated 1RM.</p>
 
@@ -143,7 +143,7 @@ function WorkoutToolsPage() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-zinc-900">Warm-up Planner</h2>
           <p className="mt-1 text-xs text-zinc-500">Build warm-up jumps automatically for your target working weight.</p>
 
@@ -176,7 +176,7 @@ function WorkoutToolsPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-zinc-900">Plate Math</h2>
           <p className="mt-1 text-xs text-zinc-500">Open the plate calculator for fast per-side loading.</p>
 

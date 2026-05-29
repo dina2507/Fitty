@@ -551,7 +551,7 @@ function HistoryPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
       <div className="mb-6 flex flex-col gap-4">
-        <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setViewMonth((current) => addMonths(current, -1))}
@@ -597,7 +597,7 @@ function HistoryPage() {
 
         {exportStatus && <p className="text-xs text-zinc-600">{exportStatus}</p>}
 
-        <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-zinc-900">All-Time PR Leaderboard</h3>
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
@@ -625,7 +625,7 @@ function HistoryPage() {
           )}
         </section>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               {TYPE_FILTERS.map((type) => (
@@ -687,7 +687,7 @@ function HistoryPage() {
           </div>
         </div>
 
-        <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-2xl font-semibold text-zinc-900">Completed Workouts</h2>
@@ -718,7 +718,7 @@ function HistoryPage() {
       </div>
 
       {entries.length === 0 ? (
-        <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-sm">
+        <div className="rounded-2xl border border-zinc-200 bg-white p-8 text-center shadow-sm">
           <h3 className="text-lg font-semibold text-zinc-900">No workouts in this view</h3>
           <p className="mt-2 text-sm text-zinc-600">Try a different month or loosen your filters.</p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
@@ -762,7 +762,7 @@ function HistoryPage() {
             const totalVolume = calculateWorkoutVolume(item.exercises || [])
 
             return (
-              <article key={`${item.date}-${originalIndex}`} className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+              <article key={`${item.date}-${originalIndex}`} className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
                 <button
                   onClick={() => setExpandedIndex(isExpanded ? null : originalIndex)}
                   className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-zinc-50 transition-colors"

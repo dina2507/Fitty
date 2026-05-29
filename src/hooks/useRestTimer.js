@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { playRestEndAlert, primeAudio } from '../utils/restAlert'
 
 /**
  * Rest timer hook.
@@ -33,6 +34,7 @@ export function useRestTimer(options = {}) {
   }, [])
 
   const startTimer = useCallback((seconds) => {
+    primeAudio() // unlock audio on this user gesture so the end-beep can play later
     stopTimer()
     endTimeRef.current = Date.now() + seconds * 1000
     setTimeLeft(seconds)
@@ -52,10 +54,8 @@ export function useRestTimer(options = {}) {
         setIsRunning(false)
         setTimeLeft(0)
 
-        // Vibrate on completion
-        if (enableVibration && navigator.vibrate) {
-          navigator.vibrate([200, 100, 200])
-        }
+        // Audible + haptic + title-flash alert (works backgrounded)
+        playRestEndAlert({ vibrate: enableVibration })
       } else {
         setTimeLeft(remainingSecs)
       }

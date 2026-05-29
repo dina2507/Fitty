@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import { flushSyncQueue, getSyncQueue } from '../utils/syncQueue'
+
+const STATUS_CONFIG = {
+  saved: { icon: '☁️', label: 'All workouts synced', color: 'text-emerald-600' },
+  syncing: { icon: '🔄', label: 'Syncing…', color: 'text-amber-600' },
+  offline: { icon: '📴', label: 'Offline – changes queued', color: 'text-zinc-400' },
+  error: { icon: '⚠️', label: 'Sync issue – tap to retry', color: 'text-red-500' },
+}
 
 function SyncIndicator() {
   const syncStatus = useWorkoutStore((state) => state.syncStatus)
@@ -8,14 +15,7 @@ function SyncIndicator() {
   const [pendingCount, setPendingCount] = useState(0)
   const [isManualSyncing, setIsManualSyncing] = useState(false)
 
-  const statusConfig = {
-    saved: { icon: '☁️', label: 'All workouts synced', color: 'text-emerald-600' },
-    syncing: { icon: '🔄', label: 'Syncing…', color: 'text-amber-600' },
-    offline: { icon: '📴', label: 'Offline – changes queued', color: 'text-zinc-400' },
-    error: { icon: '⚠️', label: 'Sync issue – tap to retry', color: 'text-red-500' },
-  }
-
-  const config = statusConfig[syncStatus] || statusConfig.saved
+  const config = STATUS_CONFIG[syncStatus] || STATUS_CONFIG.saved
   const showRetryButton = syncStatus === 'error' || syncStatus === 'offline' || pendingCount > 0
 
   const refreshPendingCount = useCallback(() => {
@@ -100,4 +100,4 @@ function SyncIndicator() {
   )
 }
 
-export default SyncIndicator
+export default memo(SyncIndicator)

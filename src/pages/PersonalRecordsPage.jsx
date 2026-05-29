@@ -167,7 +167,7 @@ function PersonalRecordsPage() {
 
   return (
     <div className="mx-auto grid max-w-6xl gap-5 px-4 py-6 pb-24">
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-wide text-zinc-500">Records Center</p>
@@ -216,7 +216,7 @@ function PersonalRecordsPage() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-zinc-900">Goal Planner</h2>
           <p className="mt-1 text-xs text-zinc-500">Create a top-set target or estimated 1RM target for any tracked exercise.</p>
 
@@ -302,7 +302,7 @@ function PersonalRecordsPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-zinc-900">Goal Progress</h2>
             <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-600">
@@ -368,7 +368,7 @@ function PersonalRecordsPage() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <h2 className="text-lg font-semibold text-zinc-900">Personal Records Detail Tables</h2>
 

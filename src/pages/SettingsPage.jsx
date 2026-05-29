@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import DriveBackup from '../components/DriveBackup'
 import { useWorkoutStore } from '../store/useWorkoutStore'
+import { storage } from '../utils/storage'
 import {
   buildPRsCSV,
   buildWeeklyVolumeCSV,
@@ -14,6 +15,7 @@ function SettingsPage() {
   const exportData = useWorkoutStore((state) => state.exportData)
   const importData = useWorkoutStore((state) => state.importData)
   const resetProgram = useWorkoutStore((state) => state.resetProgram)
+  const initializeStore = useWorkoutStore((state) => state.initializeStore)
   const setProgramStart = useWorkoutStore((state) => state.setProgramStart)
   const importWorkoutPlan = useWorkoutStore((state) => state.importWorkoutPlan)
   const switchWorkoutPlan = useWorkoutStore((state) => state.switchWorkoutPlan)
@@ -32,6 +34,7 @@ function SettingsPage() {
 
   const [backupText, setBackupText] = useState('')
   const [status, setStatus] = useState('')
+  const [recovery, setRecovery] = useState(() => storage.getRecoverySnapshot())
   const [restDefaultInput, setRestDefaultInput] = useState(String(restTimerDefault))
   const [isSavingPrefs, setIsSavingPrefs] = useState(false)
   const [isSwitchingProgram, setIsSwitchingProgram] = useState(false)
@@ -92,11 +95,35 @@ function SettingsPage() {
   }
 
   const onReset = () => {
-    const ok = window.confirm('Reset all progress data? This cannot be undone.')
+    const ok = window.confirm(
+      'Reset ALL data — workout history, plans, and settings?\n\n'
+      + 'A recovery snapshot is kept automatically, so you can restore it afterwards from the "Data recovery" section below.',
+    )
     if (!ok) return
+    const sure = window.confirm('Are you absolutely sure? This clears your current data.')
+    if (!sure) return
     resetProgram()
     setBackupText('')
-    setStatus('Program reset complete.')
+    setRecovery(storage.getRecoverySnapshot())
+    setStatus('Reset complete. A recovery snapshot is available below if you need to undo this.')
+  }
+
+  const onRecover = async () => {
+    const snap = storage.getRecoverySnapshot()
+    if (!snap?.data) {
+      setStatus('No recovery snapshot found.')
+      return
+    }
+    const count = Array.isArray(snap.data.completedDays) ? snap.data.completedDays.length : 0
+    const ok = window.confirm(
+      `Restore ${count} workout${count === 1 ? '' : 's'} (and plans/settings) from the snapshot saved ${new Date(snap.savedAt).toLocaleString()}?\n\n`
+      + 'This replaces current data with the snapshot.',
+    )
+    if (!ok) return
+    storage.restoreFromRecovery()
+    await initializeStore()
+    setStatus('Data restored from recovery snapshot.')
+    window.location.reload()
   }
 
   const onExportCsvZip = () => {
@@ -270,7 +297,7 @@ function SettingsPage() {
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-6">
       {/* Local Mode Status */}
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Local Mode</h2>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
           Cloud sync and account features are temporarily disabled. All workouts are stored locally on this device.
@@ -278,7 +305,7 @@ function SettingsPage() {
       </section>
 
       {/* Training Preferences */}
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Training Preferences</h2>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -356,7 +383,7 @@ function SettingsPage() {
       </section>
 
       {/* Google Drive Backup */}
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Google Drive Backup</h2>
         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
           Create a cloud backup copy of your Fitty data and restore from your recent backups when needed.
@@ -368,7 +395,7 @@ function SettingsPage() {
       </section>
 
       {/* Program Settings */}
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Program Settings</h2>
 
         <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/50">
@@ -445,7 +472,7 @@ function SettingsPage() {
       {/* Cloud Sync disabled for now */}
 
       {/* Backup & Data */}
-      <section className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Backup & Data</h3>
         <div className="mt-4 flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full">
           <button
@@ -469,6 +496,31 @@ function SettingsPage() {
           >
             Reset Program
           </button>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
+          <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Data recovery</p>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            Fitty keeps an automatic local snapshot before any reset or data replace, so accidental wipes can be undone.
+          </p>
+          {recovery?.data ? (
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-zinc-600 dark:text-zinc-300">
+                Snapshot from <span className="font-medium">{new Date(recovery.savedAt).toLocaleString()}</span>
+                {' · '}
+                <span className="tnum font-medium">{Array.isArray(recovery.data.completedDays) ? recovery.data.completedDays.length : 0}</span> workouts
+              </p>
+              <button
+                type="button"
+                onClick={onRecover}
+                className="w-full sm:w-auto rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                Restore snapshot
+              </button>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-zinc-400">No recovery snapshot yet — one is created automatically the first time you reset or replace data.</p>
+          )}
         </div>
 
         <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/50">

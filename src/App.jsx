@@ -1,26 +1,47 @@
-import { useEffect, useState } from 'react'
-import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { BrowserRouter as Router, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import AuthProvider from './components/AuthProvider'
 import ProtectedRoute from './components/ProtectedRoute'
-import Header from './components/Header'
+import BottomTabBar from './components/BottomTabBar'
 import MilestoneToastHost from './components/MilestoneToast'
-import AuthPage from './pages/AuthPage'
-import DashboardPage from './pages/DashboardPage'
-import HistoryPage from './pages/HistoryPage'
-import SettingsPage from './pages/SettingsPage'
-import WorkoutPage from './pages/WorkoutPage'
-import ExercisesPage from './pages/ExercisesPage'
-import ProgramPage from './pages/ProgramPage'
-import WorkoutBuilder from './pages/WorkoutBuilder'
-import StatsPage from './pages/StatsPage'
-import WorkoutToolsPage from './pages/WorkoutToolsPage'
-import PersonalRecordsPage from './pages/PersonalRecordsPage'
-import { useWorkoutStore } from './store/useWorkoutStore'
 import ErrorBoundary from './components/ErrorBoundary'
+import { useWorkoutStore } from './store/useWorkoutStore'
+
+// Critical path — loaded eagerly
+import AuthPage from './pages/AuthPage'
+import HomePage from './pages/HomePage'
+import ActiveWorkoutPage from './pages/ActiveWorkoutPage'
+import SettingsPage from './pages/SettingsPage'
+
+// Heavy pages — loaded on demand
+const HistoryPage = lazy(() => import('./pages/HistoryPage'))
+const StatsPage = lazy(() => import('./pages/StatsPage'))
+const ExercisesPage = lazy(() => import('./pages/ExercisesPage'))
+const PlanBuilderPage = lazy(() => import('./pages/PlanBuilderPage'))
+const WorkoutToolsPage = lazy(() => import('./pages/WorkoutToolsPage'))
+const PersonalRecordsPage = lazy(() => import('./pages/PersonalRecordsPage'))
+
+function PageFallback() {
+  return (
+    <div className="flex items-center justify-center min-h-[40vh]">
+      <span className="text-sm text-zinc-500">Loading…</span>
+    </div>
+  )
+}
+
+const route = (element) => (
+  <ProtectedRoute>
+    <ErrorBoundary>
+      <Suspense fallback={<PageFallback />}>{element}</Suspense>
+    </ErrorBoundary>
+  </ProtectedRoute>
+)
 
 function AppContent() {
   const initializeStore = useWorkoutStore((state) => state.initializeStore)
   const [storageWarning, setStorageWarning] = useState(false)
+  const location = useLocation()
+  const hideNav = location.pathname === '/auth'
 
   useEffect(() => {
     initializeStore()
@@ -33,11 +54,11 @@ function AppContent() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-zinc-100 text-zinc-900">
+    <div className="min-h-dvh bg-surface text-zinc-800">
       {storageWarning && (
-        <div className="fixed top-0 left-0 right-0 z-50 bg-red-600 px-4 py-2 text-center text-sm font-medium text-white">
-          Storage full — some data could not be saved. Go to{' '}
-          <a href="/settings" className="underline">Settings</a> to free up space.
+        <div className="fixed top-0 left-0 right-0 z-50 bg-danger px-4 py-2 text-center text-sm font-medium text-surface">
+          Storage full — some data could not be saved. Free up space in{' '}
+          <a href="/settings" className="underline">Settings</a>.
           <button
             type="button"
             onClick={() => setStorageWarning(false)}
@@ -48,114 +69,23 @@ function AppContent() {
           </button>
         </div>
       )}
-      <Header />
       <MilestoneToastHost />
-      <main>
+      <main className={`mx-auto max-w-2xl px-4 pt-safe ${hideNav ? 'pb-8' : 'pb-28'}`}>
         <Routes>
           <Route path="/auth" element={<AuthPage />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <DashboardPage />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workout"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <WorkoutPage />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/history"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <HistoryPage />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/exercises"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <ExercisesPage />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/stats"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <StatsPage />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/program"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <ProgramPage />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/builder"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <WorkoutBuilder />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <SettingsPage />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/tools"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <WorkoutToolsPage />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/records"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary>
-                  <PersonalRecordsPage />
-                </ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/" element={route(<HomePage />)} />
+          <Route path="/workout" element={route(<ActiveWorkoutPage />)} />
+          <Route path="/history" element={route(<HistoryPage />)} />
+          <Route path="/exercises" element={route(<ExercisesPage />)} />
+          <Route path="/stats" element={route(<StatsPage />)} />
+          <Route path="/plans" element={route(<PlanBuilderPage />)} />
+          <Route path="/settings" element={route(<SettingsPage />)} />
+          <Route path="/tools" element={route(<WorkoutToolsPage />)} />
+          <Route path="/records" element={route(<PersonalRecordsPage />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      {!hideNav && <BottomTabBar />}
     </div>
   )
 }

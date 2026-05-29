@@ -19,6 +19,10 @@ export const createUserSlice = (set, get) => ({
   dismissedAlerts: [],
 
   setProgramStart: async (date) => {
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+      console.warn('setProgramStart: invalid date format, expected YYYY-MM-DD', date)
+      return
+    }
     storage.saveProgramStart(date)
     set({ programStart: date })
 

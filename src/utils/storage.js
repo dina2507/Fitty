@@ -14,6 +14,20 @@ const STORAGE_KEYS = {
   DISMISSED_ALERTS: 'ppl_tracker_dismissed_alerts',
   EXERCISE_GOALS: 'ppl_tracker_exercise_goals',
   CUSTOM_EXERCISES: 'ppl_tracker_custom_exercises',
+  // v2 — plan-centric restructure
+  USER_PLANS: 'ppl_tracker_user_plans',
+  ACTIVE_PLAN_ID: 'ppl_tracker_active_plan_id',
+  ACTIVE_PLAN_DAY_ID: 'ppl_tracker_active_plan_day_id',
+  SCHEMA_VERSION: 'ppl_tracker_schema_version',
+}
+
+export const SCHEMA_VERSION = 'v2'
+
+// Safety keys live OUTSIDE STORAGE_KEYS so clearAll()/reset never deletes them —
+// they are the recovery net for accidental data loss.
+const SAFETY_KEYS = {
+  HISTORY_BACKUP: 'ppl_tracker_history_backup',     // last good copy of completed_days before a shrink/clear
+  RECOVERY_SNAPSHOT: 'ppl_tracker_recovery_snapshot', // full export snapshot before a reset/replace
 }
 
 function isQuotaError(e) {
@@ -60,12 +74,63 @@ export const storage = {
   },
 
   saveCompletedDays(days) {
-    // Safeguard: prevent overwriting with empty array if we already have significant history
-    if ((!days || days.length === 0) && this.getCompletedDays().length > 0) {
+    const current = this.getCompletedDays()
+    const next = Array.isArray(days) ? days : []
+
+    // Hard safeguard: never replace existing history with an empty list.
+    if (next.length === 0 && current.length > 0) {
       console.warn('Safeguard: Blocked attempt to overwrite existing workout history with an empty list.')
+      // Make sure a backup of the current history exists in case something is wrong.
+      this.backupHistory(current, 'blocked-empty-write')
       return
     }
-    safeSetItem(STORAGE_KEYS.COMPLETED_DAYS, JSON.stringify(days))
+
+    // Safety net: if the new list is SHORTER than what we have (a delete, a bad
+    // merge, etc.), snapshot the current history first so it can be recovered.
+    if (current.length > 0 && next.length < current.length) {
+      this.backupHistory(current, 'shrink')
+    }
+
+    safeSetItem(STORAGE_KEYS.COMPLETED_DAYS, JSON.stringify(next))
+  },
+
+  // ── Recovery net ──
+  backupHistory(days, reason = 'auto') {
+    const list = Array.isArray(days) ? days : this.getCompletedDays()
+    if (!list.length) return
+    safeSetItem(SAFETY_KEYS.HISTORY_BACKUP, JSON.stringify({ savedAt: new Date().toISOString(), reason, days: list }))
+  },
+
+  getHistoryBackup() {
+    const raw = localStorage.getItem(SAFETY_KEYS.HISTORY_BACKUP)
+    if (!raw) return null
+    try { return JSON.parse(raw) } catch { return null }
+  },
+
+  // Full-export snapshot taken before a destructive reset/replace. Only overwrites
+  // an existing snapshot when the current data actually has workouts to protect.
+  snapshotForRecovery() {
+    try {
+      const data = this.exportData()
+      if (!Array.isArray(data.completedDays) || data.completedDays.length === 0) return
+      safeSetItem(SAFETY_KEYS.RECOVERY_SNAPSHOT, JSON.stringify({ savedAt: new Date().toISOString(), data }))
+    } catch (e) {
+      console.error('Failed to snapshot for recovery:', e)
+    }
+  },
+
+  getRecoverySnapshot() {
+    const raw = localStorage.getItem(SAFETY_KEYS.RECOVERY_SNAPSHOT)
+    if (!raw) return null
+    try { return JSON.parse(raw) } catch { return null }
+  },
+
+  // Restore the full pre-reset snapshot. Returns true on success.
+  restoreFromRecovery() {
+    const snap = this.getRecoverySnapshot()
+    if (!snap?.data) return false
+    this.importData(snap.data, { replaceExisting: true })
+    return true
   },
 
   getProgramStart() {
@@ -221,7 +286,57 @@ export const storage = {
     safeSetItem(STORAGE_KEYS.CUSTOM_EXERCISES, JSON.stringify(Array.isArray(exercises) ? exercises : []))
   },
 
+  // ── v2: user-built simple plans ──
+  getUserPlans() {
+    const data = localStorage.getItem(STORAGE_KEYS.USER_PLANS)
+    if (!data) return []
+    try {
+      const parsed = JSON.parse(data)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  },
+
+  saveUserPlans(plans) {
+    safeSetItem(STORAGE_KEYS.USER_PLANS, JSON.stringify(Array.isArray(plans) ? plans : []))
+  },
+
+  getActivePlanId() {
+    return localStorage.getItem(STORAGE_KEYS.ACTIVE_PLAN_ID) || null
+  },
+
+  saveActivePlanId(planId) {
+    if (!planId) {
+      localStorage.removeItem(STORAGE_KEYS.ACTIVE_PLAN_ID)
+      return
+    }
+    safeSetItem(STORAGE_KEYS.ACTIVE_PLAN_ID, String(planId))
+  },
+
+  getActivePlanDayId() {
+    return localStorage.getItem(STORAGE_KEYS.ACTIVE_PLAN_DAY_ID) || null
+  },
+
+  saveActivePlanDayId(dayId) {
+    if (!dayId) {
+      localStorage.removeItem(STORAGE_KEYS.ACTIVE_PLAN_DAY_ID)
+      return
+    }
+    safeSetItem(STORAGE_KEYS.ACTIVE_PLAN_DAY_ID, String(dayId))
+  },
+
+  getSchemaVersion() {
+    return localStorage.getItem(STORAGE_KEYS.SCHEMA_VERSION) || null
+  },
+
+  saveSchemaVersion(version) {
+    safeSetItem(STORAGE_KEYS.SCHEMA_VERSION, String(version || ''))
+  },
+
   clearAll() {
+    // Always capture a recovery snapshot before wiping, then preserve safety keys.
+    this.snapshotForRecovery()
     Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key))
   },
 
@@ -242,6 +357,9 @@ export const storage = {
       dismissedAlerts: this.getDismissedAlerts(),
       exerciseGoals: this.getExerciseGoals(),
       customExercises: this.getCustomExercises(),
+      userPlans: this.getUserPlans(),
+      activePlanId: this.getActivePlanId(),
+      activePlanDayId: this.getActivePlanDayId(),
     }
   },
 
@@ -268,6 +386,9 @@ export const storage = {
     if ('dismissedAlerts' in data) this.saveDismissedAlerts(Array.isArray(data.dismissedAlerts) ? data.dismissedAlerts : [])
     if ('exerciseGoals' in data) this.saveExerciseGoals(Array.isArray(data.exerciseGoals) ? data.exerciseGoals : [])
     if ('customExercises' in data) this.saveCustomExercises(Array.isArray(data.customExercises) ? data.customExercises : [])
+    if ('userPlans' in data) this.saveUserPlans(Array.isArray(data.userPlans) ? data.userPlans : [])
+    if ('activePlanId' in data) this.saveActivePlanId(data.activePlanId || null)
+    if ('activePlanDayId' in data) this.saveActivePlanDayId(data.activePlanDayId || null)
   }
 }
 

@@ -502,7 +502,7 @@ function ExercisesPage() {
             const isExpanded = expandedGroups.has(group)
             const colors = getMuscleGroupColor(group)
             return (
-              <div key={group} className="rounded-xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
+              <div key={group} className="rounded-2xl border border-zinc-200 bg-white shadow-sm overflow-hidden">
                 <button
                   onClick={() => toggleGroup(group)}
                   className="w-full flex items-center justify-between px-4 py-3 hover:bg-zinc-50 transition-colors"
@@ -568,7 +568,7 @@ function ExercisesPage() {
         <div className="grid gap-2">
           <p className="text-xs text-zinc-500">{filteredJeff.length} exercises</p>
           {filteredJeff.map(ex => (
-            <div key={ex.id} className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white p-3 shadow-sm hover:bg-zinc-50">
+            <div key={ex.id} className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm hover:bg-zinc-50">
               <button
                 onClick={() => { setDetailExercise(ex); setDetailIsCustom(false) }}
                 className="min-w-0 flex-1 text-left"
@@ -622,7 +622,7 @@ function ExercisesPage() {
           ) : (
             <div className="grid gap-2">
               {filteredCustom.map(ex => (
-                <div key={ex.id} className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <div key={ex.id} className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
                   <button onClick={() => { setDetailExercise(ex); setDetailIsCustom(true) }} className="min-w-0 flex-1 text-left">
                     <p className="font-medium text-zinc-900 truncate">{ex.name}</p>
                     <p className="mt-0.5 text-xs text-zinc-500">{ex.default_sets} sets × {ex.default_reps}{ex.equipment ? ` · ${ex.equipment}` : ''}</p>

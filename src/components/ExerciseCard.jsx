@@ -1,3 +1,5 @@
+import { memo } from 'react'
+
 function ExerciseCard({ exercise, index }) {
   const alternatives = [exercise.sub1, exercise.sub2].filter(
     (option) => option && option !== 'N/A',
@@ -45,4 +47,4 @@ function ExerciseCard({ exercise, index }) {
   )
 }
 
-export default ExerciseCard
+export default memo(ExerciseCard)

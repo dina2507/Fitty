@@ -7,7 +7,7 @@ import defaultProgram from '../data/program.json'
 
 export const BUILT_IN_PROGRAM_ID = 'built_in_default_program'
 export const LEGACY_PROGRESS_OPTIONAL_FIELDS = ['weight_unit', 'rest_timer_default', 'dismissed_alerts']
-export const CLOUD_SYNC_ENABLED = false
+export const CLOUD_SYNC_ENABLED = import.meta.env.VITE_CLOUD_SYNC_ENABLED === 'true'
 
 export let cloudSyncPromise = null
 export function setCloudSyncPromise(promise) {

@@ -1,5 +1,5 @@
-const APP_SHELL_CACHE = 'fitty-app-shell-v2'
-const RUNTIME_CACHE = 'fitty-runtime-v2'
+const APP_SHELL_CACHE = 'fitty-app-shell-v3'
+const RUNTIME_CACHE = 'fitty-runtime-v3'
 const CORE_ASSETS = [
   '/',
   '/index.html',

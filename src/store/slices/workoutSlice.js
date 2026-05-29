@@ -1,4 +1,5 @@
 import { storage } from '../../utils/storage'
+import { getTodayDateString } from '../../utils/dateUtils'
 import { getNextDay } from '../../utils/progressTracker'
 import {
   normalizeWorkoutLogEntry,
@@ -27,7 +28,7 @@ export const createWorkoutSlice = (set, get) => ({
 
   updateTodayWorkout: async (workoutData, metadata = {}) => {
     const { completedDays } = get()
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = getTodayDateString()
     const targetPhaseId = metadata.phaseId
     const targetWeek = Number.isFinite(Number(metadata.week)) ? Number(metadata.week) : null
     const targetDayIndex = Number.isFinite(Number(metadata.dayIndex)) ? Number(metadata.dayIndex) : null
@@ -184,6 +185,55 @@ export const createWorkoutSlice = (set, get) => ({
     }
   },
 
+  // Log a session for a user-built "simple" plan (no periodized auto-advance).
+  completeSimpleWorkout: async (workoutData, metadata = {}) => {
+    const { completedDays } = get()
+    const nowIso = normalizeRemoteDate(new Date().toISOString())
+    const workoutLabel = metadata.workoutLabel || 'Workout'
+
+    const completedDay = normalizeWorkoutLogEntry({
+      id: createWorkoutLogId(),
+      date: nowIso,
+      phaseId: '',
+      week: 1,
+      dayIndex: 0,
+      label: workoutLabel,
+      workout_name: workoutLabel,
+      exercises: workoutData,
+      sessionNotes: metadata.sessionNotes || '',
+      session_notes: metadata.sessionNotes || '',
+      durationMinutes: Number.isFinite(metadata.durationMinutes) ? metadata.durationMinutes : null,
+      duration_minutes: Number.isFinite(metadata.durationMinutes) ? metadata.durationMinutes : null,
+      prExercises: Array.isArray(metadata.prExercises) ? metadata.prExercises : [],
+      pr_exercises: Array.isArray(metadata.prExercises) ? metadata.prExercises : [],
+      updated_at: nowIso,
+      deleted_at: null,
+    }, { ensureId: true })
+
+    // Tag with plan provenance (local-only; not synced to Supabase columns).
+    completedDay.planId = metadata.planId || null
+    completedDay.planDayId = metadata.planDayId || null
+
+    const newCompletedDays = [...completedDays, completedDay]
+    storage.saveCompletedDays(newCompletedDays)
+    set({ completedDays: newCompletedDays })
+
+    triggerAutoDriveBackup()
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      set({ syncStatus: 'syncing' })
+      const logPayload = buildWorkoutLogPayload(session.user.id, completedDay)
+      const sync = await upsertWorkoutLogToSupabase(logPayload)
+      set({ syncStatus: sync.offline ? 'offline' : (sync.error ? 'error' : 'saved') })
+    }
+  },
+
   skipDay: async () => {
     const { currentPhaseId, currentWeek, currentDayIndex, program } = get()
 
@@ -272,7 +322,7 @@ export const createWorkoutSlice = (set, get) => ({
   logBodyweight: async (weight) => {
     const { bodyweightLogs } = get()
     const today = new Date().toISOString()
-    const todaySimple = today.split('T')[0]
+    const todaySimple = getTodayDateString()
     
     const existingIndex = bodyweightLogs.findIndex(log => log.date.startsWith(todaySimple))
     

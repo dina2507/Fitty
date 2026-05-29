@@ -468,21 +468,21 @@ function StatsPage() {
         </p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
+          <div className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm">
             <p className="text-[11px] uppercase tracking-wide text-zinc-500">Sessions</p>
             <p className="mt-1 text-2xl font-semibold text-zinc-900">{workoutCount}</p>
           </div>
-          <div className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
+          <div className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm">
             <p className="text-[11px] uppercase tracking-wide text-zinc-500">Total Volume</p>
             <p className="mt-1 text-2xl font-semibold text-zinc-900">{formatCompactNumber(Math.round(totalVolumeAllTime))}</p>
             <p className="text-xs text-zinc-500">kg lifted</p>
           </div>
-          <div className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
+          <div className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm">
             <p className="text-[11px] uppercase tracking-wide text-zinc-500">Avg Sets/Week</p>
             <p className="mt-1 text-2xl font-semibold text-zinc-900">{avgSetsPerWeek}</p>
             <p className="text-xs text-zinc-500">last 6 weeks</p>
           </div>
-          <div className="rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
+          <div className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm">
             <p className="text-[11px] uppercase tracking-wide text-zinc-500">Best Streak</p>
             <p className="mt-1 text-2xl font-semibold text-zinc-900">{achievementProgress.bestStreak}</p>
             <p className="text-xs text-zinc-500">consecutive days</p>
@@ -491,7 +491,7 @@ function StatsPage() {
       </div>
 
       {showStatsEmpty ? (
-        <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <h3 className="text-lg font-semibold text-zinc-900">Stats preview</h3>
           <p className="mt-2 text-sm text-zinc-600">Log at least 2 workouts to see your stats.</p>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -510,7 +510,7 @@ function StatsPage() {
         </section>
       ) : (
         <>
-          <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-zinc-800">Weekly Volume by Muscle Group (Last 8 Weeks)</h3>
               <p className="text-xs text-zinc-500">Stacked bars show where your weekly load is concentrated.</p>
@@ -531,7 +531,7 @@ function StatsPage() {
             </div>
           </section>
 
-          <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-zinc-800">Total Sets per Week (Last 12 Weeks)</h3>
               <p className="text-xs text-zinc-500">Use this trend to spot fatigue spikes or missed weeks.</p>
@@ -549,7 +549,7 @@ function StatsPage() {
             </div>
           </section>
 
-          <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="text-sm font-semibold text-zinc-800">PR Progress per Exercise</h3>
               <div className="flex flex-wrap items-center gap-2">
@@ -598,7 +598,7 @@ function StatsPage() {
             </div>
           </section>
 
-          <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-zinc-800">Workout Frequency Heatmap (Last 12 Weeks)</h3>
               <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-600">
@@ -632,7 +632,7 @@ function StatsPage() {
         </>
       )}
 
-      <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+      <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h3 className="text-sm font-semibold text-zinc-800">Body Weight Log</h3>
@@ -686,7 +686,7 @@ function StatsPage() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+      <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-zinc-800">Achievements</h3>
           <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold text-zinc-600">

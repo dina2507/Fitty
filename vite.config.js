@@ -13,5 +13,17 @@ export default defineConfig({
   },
   define: {
     __VITE_SKIP_HMR__: true
-  }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          recharts: ['recharts'],
+          'pdf-export': ['jspdf', 'jspdf-autotable'],
+          'dnd-kit': ['@dnd-kit/core', '@dnd-kit/sortable'],
+          vendor: ['react', 'react-dom', 'react-router-dom', 'zustand'],
+        },
+      },
+    },
+  },
 })
