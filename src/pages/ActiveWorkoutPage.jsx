@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Minus, Plus, Check, Trash2, Timer, X, ChevronLeft, ChevronRight, ChevronDown, Flag, StickyNote,
-  Lightbulb, Flame, Weight, AlertTriangle, TrendingDown,
+  Lightbulb, Flame, Weight, AlertTriangle, TrendingDown, ArrowLeftRight,
 } from 'lucide-react'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import { useRestTimer, formatTime } from '../hooks/useRestTimer'
@@ -11,6 +11,7 @@ import { usePRDetection } from '../hooks/usePRDetection'
 import { useWakeLock } from '../hooks/useWakeLock'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import ExercisePickerSheet from '../components/ExercisePickerSheet'
+import { SwapExerciseModal } from '../components/Workout/SwapExerciseModal'
 import { parseRestSeconds } from '../utils/workoutHelpers'
 import { getProgressionSuggestion, detectPlateau } from '../utils/progressionSuggestion'
 import { generateWarmupSets, getWarmupReferenceWeight } from '../utils/warmupSets'
@@ -88,10 +89,12 @@ export default function ActiveWorkoutPage() {
   const setPeriodizedPosition = useWorkoutStore((s) => s.setPeriodizedPosition)
   const setActivePlan = useWorkoutStore((s) => s.setActivePlan)
   const userPlans = useWorkoutStore((s) => s.userPlans)
+  const addProgramCustomization = useWorkoutStore((s) => s.addProgramCustomization)
 
   const session = getActiveSession()
   const [showDaySwitcher, setShowDaySwitcher] = useState(false)
   const [switcherWeek, setSwitcherWeek] = useState(1)
+  const [swappingExId, setSwappingExId] = useState(null)
   const sessionKey = `${session.planId}::${session.planDayId}`
 
   const [exercises, setExercises] = useState(session.exercises || [])
@@ -404,6 +407,14 @@ export default function ActiveWorkoutPage() {
                     </button>
                   )}
                   <button
+                    onClick={() => setSwappingExId(ex.id)}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:text-accent active:scale-95"
+                    aria-label="Swap exercise"
+                    title="Swap exercise"
+                  >
+                    <ArrowLeftRight size={15} />
+                  </button>
+                  <button
                     onClick={() => removeExercise(ex.id)}
                     className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:text-danger active:scale-95"
                     aria-label="Remove exercise from this workout"
@@ -599,6 +610,43 @@ export default function ActiveWorkoutPage() {
           onAdd={addExerciseToSession}
         />
       )}
+
+      {swappingExId && (() => {
+        const swapEx = exercises.find((e) => e.id === swappingExId)
+        if (!swapEx) return null
+        return (
+          <SwapExerciseModal
+            exercise={swapEx}
+            onClose={() => setSwappingExId(null)}
+            onSwap={(newEx, isPermanent) => {
+              // Replace exercise in session, keeping the same id so the log entry maps correctly
+              setExercises((prev) => prev.map((e) =>
+                e.id === swappingExId ? { ...newEx, id: swappingExId } : e
+              ))
+              // Resize log to match new workingSets count, preserving any already-entered sets
+              const newCount = Math.max(1, Number(newEx.workingSets) || 1)
+              setExerciseLog((prev) => {
+                const existing = prev[swappingExId] || { sets: [], notes: '' }
+                let sets
+                if (existing.sets.length >= newCount) {
+                  sets = existing.sets.slice(0, newCount)
+                } else {
+                  sets = [
+                    ...existing.sets,
+                    ...Array.from({ length: newCount - existing.sets.length }, emptySet),
+                  ]
+                }
+                return { ...prev, [swappingExId]: { ...existing, sets } }
+              })
+              // Permanent swap: persist via program customization (only for program-origin exercises)
+              if (isPermanent && !swappingExId.startsWith('added_')) {
+                addProgramCustomization(swappingExId, newEx)
+              }
+              setSwappingExId(null)
+            }}
+          />
+        )
+      })()}
 
       {/* finish confirm sheet */}
       {showFinish && (

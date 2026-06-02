@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Dumbbell, Plus, ChevronRight, ChevronLeft, Calendar, Layers, Play } from 'lucide-react'
+import { Dumbbell, Plus, ChevronRight, ChevronLeft, Calendar, Layers, Play, CheckCircle2 } from 'lucide-react'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import SyncIndicator from '../components/SyncIndicator'
 import { getTodayDateString } from '../utils/dateUtils'
@@ -41,6 +41,19 @@ export default function HomePage() {
   const todayCount = useMemo(() => {
     const today = getTodayDateString()
     return (completedDays || []).filter((d) => String(d?.date || '').startsWith(today) && !d?.deletedAt).length
+  }, [completedDays])
+
+  // Map of completed periodized sessions: key = `${phaseId}_w${week}_d${dayIndex}` → most-recent entry
+  const completedPeriodizedDays = useMemo(() => {
+    const map = {}
+    for (const day of completedDays || []) {
+      if (day?.deletedAt || day?.deleted_at || !day?.phaseId) continue
+      const key = `${day.phaseId}_w${day.week}_d${day.dayIndex}`
+      if (!map[key] || (day.date || '') > (map[key].date || '')) {
+        map[key] = { exerciseCount: (day.exercises || []).length, date: day.date }
+      }
+    }
+    return map
   }, [completedDays])
 
   const resume = useMemo(() => {
@@ -227,6 +240,11 @@ export default function HomePage() {
                           && phase?.id === currentPhaseId
                           && (browse.weekIdx + 1) === Number(currentWeek)
                           && dIdx === Number(currentDayIndex)
+                        const completionKey = `${phase?.id}_w${browse.weekIdx + 1}_d${dIdx}`
+                        const completion = completedPeriodizedDays[completionKey]
+                        const totalEx = (day.exercises || []).length
+                        const loggedEx = completion?.exerciseCount ?? 0
+                        const isDone = Boolean(completion)
                         if (day.isRest) {
                           return (
                             <div
@@ -242,7 +260,11 @@ export default function HomePage() {
                           <button
                             key={day.id || dIdx}
                             onClick={() => startPeriodizedDay(plan, browse.phaseIdx, browse.weekIdx, dIdx)}
-                            className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition active:scale-[0.98] ${isCurrent ? 'border-accent bg-accent-soft' : 'border-surface-border bg-surface-overlay hover:bg-zinc-50'}`}
+                            className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition active:scale-[0.98] ${
+                              isDone ? 'border-emerald-200 bg-emerald-50'
+                              : isCurrent ? 'border-accent bg-accent-soft'
+                              : 'border-surface-border bg-surface-overlay hover:bg-zinc-50'
+                            }`}
                           >
                             <div className="min-w-0">
                               <p className="flex items-center gap-2 font-medium text-zinc-800">
@@ -252,12 +274,19 @@ export default function HomePage() {
                                 )}
                               </p>
                               <p className="text-xs text-zinc-500">
-                                {(day.exercises || []).length} exercise{(day.exercises || []).length === 1 ? '' : 's'}
+                                {totalEx} exercise{totalEx === 1 ? '' : 's'}
                               </p>
                             </div>
-                            <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-accent">
-                              <Play size={15} /> Start
-                            </span>
+                            {isDone ? (
+                              <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-emerald-700">
+                                <CheckCircle2 size={15} className="text-emerald-500" />
+                                {loggedEx}/{totalEx}
+                              </span>
+                            ) : (
+                              <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-accent">
+                                <Play size={15} /> Start
+                              </span>
+                            )}
                           </button>
                         )
                       })}
