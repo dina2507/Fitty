@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Minus, Plus, Check, Trash2, Timer, X, ChevronLeft, Flag, StickyNote,
-  Lightbulb, Flame, Weight,
+  Minus, Plus, Check, Trash2, Timer, X, ChevronLeft, ChevronRight, ChevronDown, Flag, StickyNote,
+  Lightbulb, Flame, Weight, AlertTriangle, TrendingDown,
 } from 'lucide-react'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import { useRestTimer, formatTime } from '../hooks/useRestTimer'
@@ -12,7 +12,7 @@ import { useWakeLock } from '../hooks/useWakeLock'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import ExercisePickerSheet from '../components/ExercisePickerSheet'
 import { parseRestSeconds } from '../utils/workoutHelpers'
-import { getProgressionSuggestion } from '../utils/progressionSuggestion'
+import { getProgressionSuggestion, detectPlateau } from '../utils/progressionSuggestion'
 import { generateWarmupSets, getWarmupReferenceWeight } from '../utils/warmupSets'
 import { computePlatesPerSide, formatPlatesPerSide } from '../utils/plateMath'
 
@@ -81,8 +81,17 @@ export default function ActiveWorkoutPage() {
   const weightUnit = useWorkoutStore((s) => s.weightUnit)
   const restTimerDefault = useWorkoutStore((s) => s.restTimerDefault)
   const restTimerVibration = useWorkoutStore((s) => s.restTimerVibration)
+  const program = useWorkoutStore((s) => s.program)
+  const currentPhaseId = useWorkoutStore((s) => s.currentPhaseId)
+  const currentWeek = useWorkoutStore((s) => s.currentWeek)
+  const currentDayIndex = useWorkoutStore((s) => s.currentDayIndex)
+  const setPeriodizedPosition = useWorkoutStore((s) => s.setPeriodizedPosition)
+  const setActivePlan = useWorkoutStore((s) => s.setActivePlan)
+  const userPlans = useWorkoutStore((s) => s.userPlans)
 
   const session = getActiveSession()
+  const [showDaySwitcher, setShowDaySwitcher] = useState(false)
+  const [switcherWeek, setSwitcherWeek] = useState(1)
   const sessionKey = `${session.planId}::${session.planDayId}`
 
   const [exercises, setExercises] = useState(session.exercises || [])
@@ -335,10 +344,17 @@ export default function ActiveWorkoutPage() {
         <button onClick={() => navigate('/')} className="btn-ghost p-2" aria-label="Back">
           <ChevronLeft size={22} />
         </button>
-        <div className="flex-1 min-w-0">
-          <p className="truncate text-xs uppercase tracking-wider text-zinc-500">{session.planName}</p>
-          <h1 className="truncate text-xl font-extrabold text-zinc-900">{session.label}</h1>
-        </div>
+        <button
+          onClick={() => { setSwitcherWeek(Number(currentWeek) || 1); setShowDaySwitcher(true) }}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          aria-label="Switch day"
+        >
+          <div className="min-w-0">
+            <p className="truncate text-xs uppercase tracking-wider text-zinc-500">{session.planName}</p>
+            <h1 className="truncate text-xl font-extrabold text-zinc-900">{session.label}</h1>
+          </div>
+          <ChevronDown size={18} className="shrink-0 text-zinc-400" />
+        </button>
         <span className="tnum rounded-full bg-surface border border-surface-border px-3 py-1 text-sm font-semibold text-zinc-700">
           {loggedSetCount} set{loggedSetCount === 1 ? '' : 's'}
         </span>
@@ -349,7 +365,9 @@ export default function ActiveWorkoutPage() {
         {exercises.map((ex) => {
           const log = exerciseLog[ex.id] || { sets: [emptySet()], notes: '' }
           const prev = previousWeights[ex.id]
-          const suggestion = getProgressionSuggestion(historyByName[ex.name] || [], ex.reps, ex.muscleGroup)
+          const exHistory = historyByName[ex.name] || []
+          const suggestion = getProgressionSuggestion(exHistory, ex.reps, ex.muscleGroup)
+          const plateau = detectPlateau(exHistory)
           const firstWeight = log.sets?.[0]?.weight
           const refWeight = getWarmupReferenceWeight(firstWeight, prev?.weight)
           const warmups = generateWarmupSets(refWeight, weightUnit, { warmupSets: ex.warmupSets, workingReps: ex.reps })
@@ -396,10 +414,20 @@ export default function ActiveWorkoutPage() {
                 </div>
               </div>
 
+              {/* plateau warning (takes priority — flags a stall before the nudge) */}
+              {plateau.plateaued && (
+                <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warn" />
+                  <span>{plateau.message}</span>
+                </div>
+              )}
+
               {/* progression suggestion */}
               {suggestion.suggest && suggestion.message && (
-                <div className="mb-3 flex items-start gap-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-emerald-900">
-                  <Lightbulb size={15} className="mt-0.5 shrink-0 text-accent" />
+                <div className="mb-3 flex items-start gap-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-accent-fg">
+                  {suggestion.type === 'backoff'
+                    ? <TrendingDown size={15} className="mt-0.5 shrink-0 text-accent" />
+                    : <Lightbulb size={15} className="mt-0.5 shrink-0 text-accent" />}
                   <span>{suggestion.message}</span>
                 </div>
               )}
@@ -464,7 +492,7 @@ export default function ActiveWorkoutPage() {
                   return (
                     <div
                       key={idx}
-                      className={`grid grid-cols-[20px_1fr_1fr_44px_28px] items-center gap-1.5 rounded-xl px-0.5 py-1 ${done ? 'bg-accent-soft border border-emerald-100' : ''}`}
+                      className={`grid grid-cols-[20px_1fr_1fr_44px_28px] items-center gap-1.5 rounded-xl px-0.5 py-1 ${done ? 'bg-accent-soft border border-surface-border' : ''}`}
                     >
                       <span className={`tnum text-center text-sm font-bold ${done ? 'text-accent' : 'text-zinc-400'}`}>
                         {done ? <Check size={15} className="mx-auto" /> : idx + 1}
@@ -504,7 +532,7 @@ export default function ActiveWorkoutPage() {
                       onClick={() => saveExercise(ex.id)}
                       disabled={!exDone}
                       className={saved
-                        ? 'inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-accent-soft px-4 py-3 text-sm font-semibold text-accent disabled:opacity-50'
+                        ? 'inline-flex items-center justify-center gap-2 rounded-xl border border-surface-border bg-accent-soft px-4 py-3 text-sm font-semibold text-accent disabled:opacity-50'
                         : 'btn-primary text-sm'}
                     >
                       <Check size={16} /> {saved ? 'Saved' : 'Save exercise'}
@@ -589,6 +617,100 @@ export default function ActiveWorkoutPage() {
             <button onClick={discard} className="w-full btn-ghost text-sm text-danger">
               Discard workout
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* day switcher sheet */}
+      {showDaySwitcher && (
+        <div className="fixed inset-0 z-40 flex items-end bg-black/60" onClick={() => setShowDaySwitcher(false)}>
+          <div className="w-full rounded-t-3xl border-t border-surface-border bg-surface-raised p-5 pb-safe" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-zinc-900">Switch day</h2>
+              <button onClick={() => setShowDaySwitcher(false)} className="btn-ghost p-2"><X size={20} /></button>
+            </div>
+
+            {session.kind === 'periodized' ? (() => {
+              const phase = program?.phases?.find((p) => p.id === currentPhaseId)
+              const weeks = phase?.weeks || []
+              const week = weeks[switcherWeek - 1] || weeks[0]
+              const days = week?.days || []
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <button
+                      disabled={switcherWeek <= 1}
+                      onClick={() => setSwitcherWeek((w) => Math.max(1, w - 1))}
+                      className="btn-ghost p-2 disabled:opacity-30"
+                      aria-label="Previous week"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <p className="text-sm font-semibold text-zinc-800">
+                      Week {switcherWeek} <span className="font-normal text-zinc-400">of {weeks.length}</span>
+                    </p>
+                    <button
+                      disabled={switcherWeek >= weeks.length}
+                      onClick={() => setSwitcherWeek((w) => Math.min(weeks.length, w + 1))}
+                      className="btn-ghost p-2 disabled:opacity-30"
+                      aria-label="Next week"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+                  <div className="max-h-[50vh] space-y-2 overflow-y-auto">
+                    {days.map((day, dIdx) => {
+                      const isCurrent = switcherWeek === Number(currentWeek) && dIdx === Number(currentDayIndex)
+                      if (day.isRest) {
+                        return (
+                          <div key={day.id || dIdx} className="flex items-center justify-between rounded-xl bg-surface px-4 py-3 text-sm text-zinc-400">
+                            <span>{day.label || 'Rest day'}</span>
+                            <span className="text-xs uppercase tracking-wider">Rest</span>
+                          </div>
+                        )
+                      }
+                      return (
+                        <button
+                          key={day.id || dIdx}
+                          onClick={async () => { await setPeriodizedPosition(currentPhaseId, switcherWeek, dIdx); setShowDaySwitcher(false) }}
+                          className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition active:scale-[0.98] ${isCurrent ? 'border-accent bg-accent-soft' : 'border-surface-border bg-surface-overlay hover:bg-zinc-50'}`}
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-zinc-800">{day.label}</p>
+                            <p className="text-xs text-zinc-500">{(day.exercises || []).length} exercise{(day.exercises || []).length === 1 ? '' : 's'}</p>
+                          </div>
+                          {isCurrent && <span className="shrink-0 text-xs font-semibold text-accent">Current</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })() : (() => {
+              const plan = (userPlans || []).find((p) => p.id === session.planId)
+              const days = plan?.days || []
+              return (
+                <div className="max-h-[50vh] space-y-2 overflow-y-auto">
+                  {days.length === 0 && <p className="px-1 py-2 text-sm text-zinc-500">No other days in this plan.</p>}
+                  {days.map((day) => {
+                    const isCurrent = day.id === session.planDayId
+                    return (
+                      <button
+                        key={day.id}
+                        onClick={() => { setActivePlan(session.planId, day.id); setShowDaySwitcher(false) }}
+                        className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition active:scale-[0.98] ${isCurrent ? 'border-accent bg-accent-soft' : 'border-surface-border bg-surface-overlay hover:bg-zinc-50'}`}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-zinc-800">{day.label}</p>
+                          <p className="text-xs text-zinc-500">{(day.exercises || []).length} exercise{(day.exercises || []).length === 1 ? '' : 's'}</p>
+                        </div>
+                        {isCurrent && <span className="shrink-0 text-xs font-semibold text-accent">Current</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })()}
           </div>
         </div>
       )}

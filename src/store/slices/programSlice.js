@@ -242,6 +242,46 @@ export const createProgramSlice = (set, get) => ({
     return program.phases.find(p => p.id === currentPhaseId)
   },
 
+  // Manually jump to a specific phase/week/day in the periodized program.
+  // Additive: does NOT touch the auto-advance logic in completeWorkout.
+  setPeriodizedPosition: async (phaseId, week, dayIndex) => {
+    const { program } = get()
+    const phase = program?.phases?.find((p) => p.id === phaseId)
+    if (!phase) return { ok: false }
+    const weekNum = Number(week)
+    const dayIdx = Number(dayIndex)
+    const weekData = phase.weeks?.[weekNum - 1]
+    if (!weekData) return { ok: false }
+    if (!weekData.days?.[dayIdx]) return { ok: false }
+
+    const nextProgress = {
+      ...(storage.getProgress() || {}),
+      currentPhaseId: phaseId,
+      currentWeek: weekNum,
+      currentDayIndex: dayIdx,
+    }
+    storage.saveProgress(nextProgress)
+    set({ currentPhaseId: phaseId, currentWeek: weekNum, currentDayIndex: dayIdx })
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return { ok: true }
+    }
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      set({ syncStatus: 'syncing' })
+      const latest = get()
+      const res = await syncProgressToSupabase(session.user.id, nextProgress, latest.programStart, {
+        weightUnit: latest.weightUnit,
+        restTimerDefault: latest.restTimerDefault,
+        dismissedAlerts: latest.dismissedAlerts,
+      })
+      set({ syncStatus: res.offline ? 'offline' : (res.error ? 'error' : 'saved') })
+    }
+    return { ok: true }
+  },
+
   addProgramCustomization: async (originalExId, newEx) => {
     const { programCustomizations } = get()
     const updated = {

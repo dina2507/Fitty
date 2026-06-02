@@ -18,9 +18,9 @@ export default {
           border: '#e4e4e7',  // borders (zinc-200)
         },
         accent: {
-          DEFAULT: '#059669', // emerald-600 — primary / active / log
-          soft: '#e6f4ea',    // very soft emerald green background
-          fg: '#064e3b',      // emerald-900 for text contrast
+          DEFAULT: '#27272a', // zinc-800 — primary / active / log
+          soft: '#f4f4f5',    // zinc-100 — subtle highlight background
+          fg: '#18181b',      // zinc-900 for text contrast
         },
         pr: '#d97706',        // amber-600 — personal records
         ok: '#059669',        // emerald-600 — success

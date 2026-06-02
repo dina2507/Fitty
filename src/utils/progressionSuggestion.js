@@ -49,54 +49,50 @@ function formatRpeValue(value) {
   return value.toFixed(1)
 }
 
+const NONE = { suggest: false, message: '', recommendedWeight: null, type: 'none' }
+
 export function getProgressionSuggestion(exerciseHistory, repRange, bodyPart) {
   const history = Array.isArray(exerciseHistory) ? exerciseHistory : []
 
-  if (history.length < 2) {
-    return {
-      suggest: false,
-      message: '',
-      recommendedWeight: null,
-    }
-  }
+  if (history.length < 2) return NONE
 
   const lastSession = getTopSetFromEntry(history[0])
   const previousSession = getTopSetFromEntry(history[1])
-
-  if (!lastSession || !previousSession) {
-    return {
-      suggest: false,
-      message: '',
-      recommendedWeight: null,
-    }
-  }
+  if (!lastSession || !previousSession) return NONE
 
   const topRep = parseRepTop(repRange)
-  if (!topRep) {
+  if (!topRep) return NONE
+
+  const increment = getLoadIncrement(bodyPart)
+  const rpe = lastSession.rpe
+  const hitTop = lastSession.reps >= topRep
+
+  // Auto-regulation: if the last top set was very hard (RPE >= 9), ease the load
+  // back regardless of reps so the next session lands in the target effort range.
+  if (Number.isFinite(rpe) && rpe >= 9) {
+    const recommendedWeight = Number(Math.max(0, lastSession.weight - increment).toFixed(1))
     return {
-      suggest: false,
-      message: '',
-      recommendedWeight: null,
+      suggest: true,
+      type: 'backoff',
+      message: `Last session hit RPE ${formatRpeValue(rpe)} — ease to ${recommendedWeight}kg today to keep reps crisp, then build back up.`,
+      recommendedWeight,
     }
   }
-
-  const hitTop = lastSession.reps >= topRep
-  const rpe = lastSession.rpe
 
   if (!hitTop) {
     return {
       suggest: true,
+      type: 'hold',
       message: `Hold ${lastSession.weight}kg and aim for ${topRep} reps before increasing load.`,
       recommendedWeight: lastSession.weight,
     }
   }
 
   if (Number.isFinite(rpe) && rpe <= 8) {
-    const increment = getLoadIncrement(bodyPart)
     const recommendedWeight = Number((lastSession.weight + increment).toFixed(1))
-
     return {
       suggest: true,
+      type: 'increase',
       message: `Try ${recommendedWeight}kg today - you hit ${lastSession.weight}kg x ${lastSession.reps} at RPE ${formatRpeValue(rpe)} last session.`,
       recommendedWeight,
     }
@@ -104,7 +100,38 @@ export function getProgressionSuggestion(exerciseHistory, repRange, bodyPart) {
 
   return {
     suggest: true,
-    message: `Keep ${lastSession.weight}kg and push for extra reps (last session ${lastSession.reps} reps at RPE ${formatRpeValue(rpe)}).`,
+    type: 'hold',
+    message: `Keep ${lastSession.weight}kg and push for extra reps (last session ${lastSession.reps} reps${Number.isFinite(rpe) ? ` at RPE ${formatRpeValue(rpe)}` : ''}).`,
     recommendedWeight: lastSession.weight,
+  }
+}
+
+// Plateau: top-set weight has not meaningfully moved across the last N sessions
+// while effort (RPE) is climbing or sitting high → suggest a deload / rep-scheme change.
+export function detectPlateau(exerciseHistory, { minSessions = 3, tolerance = 2.5 } = {}) {
+  const history = Array.isArray(exerciseHistory) ? exerciseHistory : []
+  const topSets = history.map(getTopSetFromEntry).filter(Boolean) // newest-first
+
+  if (topSets.length < minSessions) return { plateaued: false, message: '', sessions: 0 }
+
+  const recent = topSets.slice(0, minSessions) // newest-first
+  const weights = recent.map((s) => s.weight)
+  const stagnant = (Math.max(...weights) - Math.min(...weights)) <= tolerance
+  if (!stagnant) return { plateaued: false, message: '', sessions: 0 }
+
+  const chrono = [...recent].reverse() // oldest-first
+  const earliestRpe = chrono[0].rpe
+  const latestRpe = chrono[chrono.length - 1].rpe
+  const rpeClimbing = Number.isFinite(latestRpe) && Number.isFinite(earliestRpe) && latestRpe > earliestRpe
+  const rpeHigh = Number.isFinite(latestRpe) && latestRpe >= 8.5
+
+  // Without RPE data we can't gauge effort, so don't cry plateau on weight alone.
+  if (!(rpeClimbing || rpeHigh)) return { plateaued: false, message: '', sessions: 0 }
+
+  const weight = recent[0].weight
+  return {
+    plateaued: true,
+    sessions: minSessions,
+    message: `Stuck at ${weight}kg for ${minSessions} sessions ${rpeClimbing ? 'with RPE creeping up' : 'at high RPE'}. Try a deload (~10% lighter) or switch rep range to break through.`,
   }
 }

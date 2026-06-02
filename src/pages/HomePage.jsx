@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Dumbbell, Plus, ChevronRight, Calendar, Layers, Play } from 'lucide-react'
+import { Dumbbell, Plus, ChevronRight, ChevronLeft, Calendar, Layers, Play } from 'lucide-react'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import SyncIndicator from '../components/SyncIndicator'
 import { getTodayDateString } from '../utils/dateUtils'
@@ -26,10 +26,15 @@ export default function HomePage() {
   const getCurrentDay = useWorkoutStore((s) => s.getCurrentDay)
   const setActivePlan = useWorkoutStore((s) => s.setActivePlan)
   const switchWorkoutPlan = useWorkoutStore((s) => s.switchWorkoutPlan)
+  const setPeriodizedPosition = useWorkoutStore((s) => s.setPeriodizedPosition)
+  const currentPhaseId = useWorkoutStore((s) => s.currentPhaseId)
+  const currentWeek = useWorkoutStore((s) => s.currentWeek)
+  const currentDayIndex = useWorkoutStore((s) => s.currentDayIndex)
 
   const plans = getPlans()
 
   const [expandedPlanId, setExpandedPlanId] = useState(null)
+  const [browse, setBrowse] = useState({ phaseIdx: 0, weekIdx: 0 })
 
   const nextPeriodizedDay = getCurrentDay()
 
@@ -50,12 +55,36 @@ export default function HomePage() {
     }
   }, [])
 
-  const startPeriodized = async (planId) => {
-    if (planId !== activeProgramId) {
-      await switchWorkoutPlan(planId)
+  // Start a specific periodized day (phase/week/day picked from the expanded card).
+  const startPeriodizedDay = async (plan, phaseIdx, weekIdx, dayIdx) => {
+    if (plan.id !== activeProgramId) {
+      await switchWorkoutPlan(plan.id)
     }
-    setActivePlan(planId, null)
+    const phase = plan.program?.phases?.[phaseIdx]
+    if (!phase) return
+    await setPeriodizedPosition(phase.id, weekIdx + 1, dayIdx)
+    setActivePlan(plan.id, null)
     navigate('/workout')
+  }
+
+  // Expand a periodized card, initializing the week/day browser to the current position.
+  const togglePeriodized = (plan, isExpanded) => {
+    if (isExpanded) {
+      setExpandedPlanId(null)
+      return
+    }
+    const phases = plan.program?.phases || []
+    let phaseIdx = 0
+    let weekIdx = 0
+    if (plan.id === activeProgramId) {
+      const ci = phases.findIndex((p) => p.id === currentPhaseId)
+      if (ci >= 0) {
+        phaseIdx = ci
+        weekIdx = Math.max(0, (Number(currentWeek) || 1) - 1)
+      }
+    }
+    setBrowse({ phaseIdx, weekIdx })
+    setExpandedPlanId(plan.id)
   }
 
   const startSimpleDay = (planId, dayId) => {
@@ -118,7 +147,7 @@ export default function HomePage() {
                 className="flex w-full items-center gap-3 px-4 py-4 text-left transition active:scale-[0.99]"
                 onClick={() => {
                   if (plan.kind === 'periodized') {
-                    startPeriodized(plan.id)
+                    togglePeriodized(plan, isExpanded)
                   } else {
                     setExpandedPlanId(isExpanded ? null : plan.id)
                   }
@@ -148,6 +177,95 @@ export default function HomePage() {
                 />
               </button>
  
+              {plan.kind === 'periodized' && isExpanded && (() => {
+                const phases = plan.program?.phases || []
+                const phase = phases[browse.phaseIdx] || phases[0]
+                const weeks = phase?.weeks || []
+                const week = weeks[browse.weekIdx] || weeks[0]
+                const days = week?.days || []
+                return (
+                  <div className="space-y-3 border-t border-surface-border px-3 py-3">
+                    {phases.length > 1 && (
+                      <div className="flex gap-1.5 overflow-x-auto pb-1">
+                        {phases.map((p, i) => (
+                          <button
+                            key={p.id}
+                            onClick={() => setBrowse({ phaseIdx: i, weekIdx: 0 })}
+                            className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition ${i === browse.phaseIdx ? 'bg-accent text-white' : 'bg-surface border border-surface-border text-zinc-600'}`}
+                          >
+                            {p.name || `Phase ${i + 1}`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <button
+                        disabled={browse.weekIdx <= 0}
+                        onClick={() => setBrowse((b) => ({ ...b, weekIdx: b.weekIdx - 1 }))}
+                        className="btn-ghost p-2 disabled:opacity-30"
+                        aria-label="Previous week"
+                      >
+                        <ChevronLeft size={18} />
+                      </button>
+                      <p className="text-sm font-semibold text-zinc-800">
+                        Week {browse.weekIdx + 1} <span className="font-normal text-zinc-400">of {weeks.length}</span>
+                      </p>
+                      <button
+                        disabled={browse.weekIdx >= weeks.length - 1}
+                        onClick={() => setBrowse((b) => ({ ...b, weekIdx: b.weekIdx + 1 }))}
+                        className="btn-ghost p-2 disabled:opacity-30"
+                        aria-label="Next week"
+                      >
+                        <ChevronRight size={18} />
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {days.map((day, dIdx) => {
+                        const isCurrent = plan.id === activeProgramId
+                          && phase?.id === currentPhaseId
+                          && (browse.weekIdx + 1) === Number(currentWeek)
+                          && dIdx === Number(currentDayIndex)
+                        if (day.isRest) {
+                          return (
+                            <div
+                              key={day.id || dIdx}
+                              className="flex items-center justify-between rounded-xl bg-surface px-4 py-3 text-sm text-zinc-400"
+                            >
+                              <span>{day.label || 'Rest day'}</span>
+                              <span className="text-xs uppercase tracking-wider">Rest</span>
+                            </div>
+                          )
+                        }
+                        return (
+                          <button
+                            key={day.id || dIdx}
+                            onClick={() => startPeriodizedDay(plan, browse.phaseIdx, browse.weekIdx, dIdx)}
+                            className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition active:scale-[0.98] ${isCurrent ? 'border-accent bg-accent-soft' : 'border-surface-border bg-surface-overlay hover:bg-zinc-50'}`}
+                          >
+                            <div className="min-w-0">
+                              <p className="flex items-center gap-2 font-medium text-zinc-800">
+                                <span className="truncate">{day.label}</span>
+                                {isCurrent && (
+                                  <span className="shrink-0 rounded-full bg-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">Next</span>
+                                )}
+                              </p>
+                              <p className="text-xs text-zinc-500">
+                                {(day.exercises || []).length} exercise{(day.exercises || []).length === 1 ? '' : 's'}
+                              </p>
+                            </div>
+                            <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-accent">
+                              <Play size={15} /> Start
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })()}
+
               {plan.kind === 'simple' && isExpanded && (
                 <div className="border-t border-surface-border px-3 py-3">
                   {(plan.plan?.days || []).length === 0 ? (
