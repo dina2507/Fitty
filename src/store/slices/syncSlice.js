@@ -26,6 +26,9 @@ import defaultProgram from '../../data/program.json'
 
 export const createSyncSlice = (set, get) => ({
   syncStatus: 'saved',
+  // False until local data (position, completedDays, plans, bodyweight…) has been
+  // loaded from storage. Guards screens from acting on default/empty state on boot.
+  hydrated: false,
 
   recomputeSyncStatus: ({ cleared = false, remoteOk = true } = {}) => {
     if (!CLOUD_SYNC_ENABLED) {
@@ -367,6 +370,11 @@ export const createSyncSlice = (set, get) => ({
       restTimerVibration: savedRestTimerVibration,
       dismissedAlerts: savedDismissedAlerts,
     })
+
+    // Local data is now in state — safe for the active-workout screen to restore
+    // its autosave against the correct session (prevents wiping in-progress logs
+    // on a cold reload before cloud sync runs).
+    set({ hydrated: true })
 
     try {
       await get().syncFromCloud({ setSyncing: true })

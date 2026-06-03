@@ -125,6 +125,7 @@ export default function ActiveWorkoutPage() {
   const setActivePlan = useWorkoutStore((s) => s.setActivePlan)
   const userPlans = useWorkoutStore((s) => s.userPlans)
   const addProgramCustomization = useWorkoutStore((s) => s.addProgramCustomization)
+  const hydrated = useWorkoutStore((s) => s.hydrated)
 
   const session = getActiveSession()
   const [showDaySwitcher, setShowDaySwitcher] = useState(false)
@@ -170,7 +171,11 @@ export default function ActiveWorkoutPage() {
   }, [previousWeights])
 
   // Hydrate from autosave (same plan+day) or initialize fresh when session changes.
+  // Wait for the store to finish loading from storage — otherwise on a cold reload
+  // we'd compute the default session, fail to match the saved autosave, and the
+  // autosave-write effect below would clobber the user's in-progress logs.
   useEffect(() => {
+    if (!hydrated) return
     // Reset in-session PR tracking when the day changes.
     celebratedRef.current = {}
     setPrExerciseIds({})
@@ -195,11 +200,11 @@ export default function ActiveWorkoutPage() {
     startTimeRef.current = Date.now()
     hydratedRef.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionKey])
+  }, [sessionKey, hydrated])
 
   // Autosave on change.
   useEffect(() => {
-    if (!hydratedRef.current) return
+    if (!hydrated || !hydratedRef.current) return
     try {
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({
         sessionKey,
@@ -599,6 +604,14 @@ export default function ActiveWorkoutPage() {
           </button>
         </div>
       </section>
+    )
+  }
+
+  if (!hydrated) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-center">
+        <span className="text-sm text-zinc-500">Loading your workout…</span>
+      </div>
     )
   }
 
