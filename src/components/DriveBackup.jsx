@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
 import {
   downloadBackupFromDrive,
   listBackupFiles,
@@ -8,6 +9,7 @@ import {
 } from '../lib/googleDrive'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import { storage } from '../utils/storage'
+import { saveBackupFile, backupFileName } from '../utils/fileBackup'
 
 const UI_STATE = {
   IDLE: 'idle',
@@ -35,6 +37,8 @@ function Spinner() {
 
 function DriveBackup() {
   const initializeStore = useWorkoutStore((state) => state.initializeStore)
+  const isNative = Capacitor.isNativePlatform()
+  const fileInputRef = useRef(null)
 
   const [uiState, setUiState] = useState(UI_STATE.IDLE)
   const [errorMessage, setErrorMessage] = useState('')
@@ -186,9 +190,58 @@ function DriveBackup() {
     localStorage.setItem('fitty_auto_drive_backup', String(nextValue))
   }
 
+  async function onExportFile() {
+    setErrorMessage('')
+    setShowRestoreList(false)
+    setSuccessMeta(null)
+    try {
+      const json = JSON.stringify(storage.exportData(), null, 2)
+      const name = backupFileName()
+      await saveBackupFile(name, json)
+      setSuccessMeta({ name, createdTime: new Date().toISOString() })
+      setUiState(UI_STATE.SUCCESS)
+    } catch (error) {
+      console.error('Backup to file failed:', error)
+      setErrorMessage(error?.message || 'Backup to file failed.')
+      setUiState(UI_STATE.ERROR)
+    }
+  }
+
+  async function onImportFile(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    const confirmed = window.confirm('Restoring will replace your current Fitty data with this backup file. Continue?')
+    if (!confirmed) return
+
+    setErrorMessage('')
+    setSuccessMeta(null)
+    try {
+      setUiState(UI_STATE.RESTORING)
+      const text = await file.text()
+      const data = JSON.parse(text)
+      storage.importData(data, { replaceExisting: true })
+      await initializeStore()
+      setUiState(UI_STATE.SUCCESS)
+      window.location.reload()
+    } catch (error) {
+      console.error('Restore from file failed:', error)
+      setErrorMessage(error?.message || 'Could not read that backup file.')
+      setUiState(UI_STATE.ERROR)
+    }
+  }
+
   return (
     <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
       <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">One-tap backup and restore</p>
+
+      {isNative && (
+        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/40 dark:text-amber-200">
+          Google Drive sign-in works only in the web app (Google blocks it inside installed apps). On your phone, use <span className="font-semibold">Backup to file</span> / <span className="font-semibold">Restore from file</span> below.
+        </div>
+      )}
+
       <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
         Fitty stores backup files in a Google Drive folder called "Fitty Backups".
       </p>
@@ -249,6 +302,39 @@ function DriveBackup() {
         >
           {isDisconnecting ? 'Disconnecting...' : 'Disconnect Google'}
         </button>
+      </div>
+
+      {/* Local file backup — works everywhere, including the installed app */}
+      <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900">
+        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Backup file (works offline)</p>
+        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+          Save a full copy of your data as a file, or restore from one. No account needed.
+        </p>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <button
+            type="button"
+            onClick={onExportFile}
+            disabled={isBusy}
+            className="w-full rounded-full bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-50 sm:w-auto"
+          >
+            Backup to file
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isBusy}
+            className="w-full rounded-full border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 sm:w-auto"
+          >
+            Restore from file
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            onChange={onImportFile}
+            className="hidden"
+          />
+        </div>
       </div>
 
       <div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900">

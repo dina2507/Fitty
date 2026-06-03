@@ -10,6 +10,8 @@ SETUP REQUIRED (one-time, done by the developer):
 8. Go to APIs & Services -> OAuth consent screen -> add your email as a test user
 */
 
+import { Capacitor } from '@capacitor/core'
+
 const GOOGLE_GAPI_SCRIPT_SRC = 'https://apis.google.com/js/api.js'
 const GOOGLE_GIS_SCRIPT_SRC = 'https://accounts.google.com/gsi/client'
 const DRIVE_DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'
@@ -302,6 +304,13 @@ export async function signInWithGoogle() {
     return googleAccessToken
   }
 
+  // Google blocks OAuth inside embedded app webviews (the Capacitor APK runs on a
+  // https://localhost origin that also isn't an authorised origin), so the popup
+  // would hang forever. Fail fast with a clear message instead.
+  if (Capacitor.isNativePlatform()) {
+    throw new Error('Google Drive sign-in isn’t available inside the installed app. Use "Backup to file" below, or sign in from the web version.')
+  }
+
   if (signInPromise) {
     return signInPromise
   }
@@ -322,7 +331,14 @@ export async function signInWithGoogle() {
   }
 
   signInPromise = new Promise((resolve, reject) => {
+    // Safety net: if Google never calls back (popup blocked, COOP, or the current
+    // origin isn't an authorised JavaScript origin), don't spin forever.
+    const timeoutId = setTimeout(() => {
+      reject(new Error('Google sign-in timed out. Allow pop-ups and make sure this domain is an authorised origin in Google Cloud, then try again.'))
+    }, 90_000)
+
     googleTokenClient.callback = (response) => {
+      clearTimeout(timeoutId)
       if (!response || response.error) {
         const message = response?.error_description || response?.error || 'Google sign-in failed.'
         reject(new Error(message))
@@ -340,6 +356,7 @@ export async function signInWithGoogle() {
     }
 
     googleTokenClient.error_callback = (error) => {
+      clearTimeout(timeoutId)
       const message = error?.message || 'Google sign-in was cancelled.'
       reject(new Error(message))
     }

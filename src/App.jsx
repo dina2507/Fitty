@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter as Router, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Capacitor } from '@capacitor/core'
 import AuthProvider from './components/AuthProvider'
 import ProtectedRoute from './components/ProtectedRoute'
 import BottomTabBar from './components/BottomTabBar'
@@ -51,6 +52,31 @@ function AppContent() {
     const handler = () => setStorageWarning(true)
     window.addEventListener('fitty:storage-quota-exceeded', handler)
     return () => window.removeEventListener('fitty:storage-quota-exceeded', handler)
+  }, [])
+
+  // Native (APK) polish: theme the status bar and make the hardware back button
+  // navigate within the app instead of always closing it.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return undefined
+    let backHandle
+    ;(async () => {
+      try {
+        const { StatusBar, Style } = await import('@capacitor/status-bar')
+        await StatusBar.setStyle({ style: Style.Light }) // light bar → dark icons
+        await StatusBar.setBackgroundColor({ color: '#ffffff' })
+      } catch { /* status bar not available */ }
+      try {
+        const { App: CapApp } = await import('@capacitor/app')
+        backHandle = await CapApp.addListener('backButton', ({ canGoBack }) => {
+          if (canGoBack && window.location.pathname !== '/') {
+            window.history.back()
+          } else {
+            CapApp.exitApp()
+          }
+        })
+      } catch { /* app plugin not available */ }
+    })()
+    return () => { backHandle?.remove?.() }
   }, [])
 
   return (
