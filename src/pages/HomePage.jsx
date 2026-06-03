@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Dumbbell, Plus, ChevronRight, ChevronLeft, Calendar, Layers, Play, CheckCircle2 } from 'lucide-react'
+import { Dumbbell, Plus, ChevronRight, ChevronLeft, Calendar, Layers, Play, CheckCircle2, Scale } from 'lucide-react'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import SyncIndicator from '../components/SyncIndicator'
 import { getTodayDateString } from '../utils/dateUtils'
@@ -30,11 +30,16 @@ export default function HomePage() {
   const currentPhaseId = useWorkoutStore((s) => s.currentPhaseId)
   const currentWeek = useWorkoutStore((s) => s.currentWeek)
   const currentDayIndex = useWorkoutStore((s) => s.currentDayIndex)
+  const bodyweightLogs = useWorkoutStore((s) => s.bodyweightLogs)
+  const logBodyweight = useWorkoutStore((s) => s.logBodyweight)
+  const weightUnit = useWorkoutStore((s) => s.weightUnit)
 
   const plans = getPlans()
 
   const [expandedPlanId, setExpandedPlanId] = useState(null)
   const [browse, setBrowse] = useState({ phaseIdx: 0, weekIdx: 0 })
+  const [bwInput, setBwInput] = useState('')
+  const [bwSaved, setBwSaved] = useState(false)
 
   const nextPeriodizedDay = getCurrentDay()
 
@@ -105,6 +110,22 @@ export default function HomePage() {
     navigate('/workout')
   }
 
+  // Latest logged bodyweight (single value only — full history lives on Stats).
+  const latestBodyweight = useMemo(() => {
+    const logs = bodyweightLogs || []
+    if (!logs.length) return null
+    return [...logs].sort((a, b) => new Date(a.date) - new Date(b.date)).at(-1)?.weight ?? null
+  }, [bodyweightLogs])
+
+  const handleLogBodyweight = async () => {
+    const parsed = parseFloat(bwInput)
+    if (!Number.isFinite(parsed) || parsed <= 0) return
+    await logBodyweight(parsed) // saves { weight, date } and syncs; one entry per day
+    setBwInput('')
+    setBwSaved(true)
+    setTimeout(() => setBwSaved(false), 2000)
+  }
+
   return (
     <div className="space-y-5 pt-4">
       <header className="flex items-start justify-between">
@@ -142,6 +163,42 @@ export default function HomePage() {
         </button>
       )}
  
+      <div className="card px-4 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent-soft text-accent">
+            <Scale size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-zinc-900">Bodyweight</p>
+            <p className="text-xs text-zinc-500">
+              {bwSaved
+                ? 'Saved ✓ — view the trend on Stats'
+                : latestBodyweight != null
+                  ? <>Last: <span className="tnum font-semibold text-zinc-700">{latestBodyweight} {weightUnit}</span></>
+                  : 'Log today’s weight to track it over time'}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            inputMode="decimal"
+            value={bwInput}
+            onChange={(e) => setBwInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleLogBodyweight() }}
+            placeholder={latestBodyweight != null ? String(latestBodyweight) : `Weight (${weightUnit})`}
+            className="field tnum flex-1"
+            aria-label="Bodyweight"
+          />
+          <button
+            onClick={handleLogBodyweight}
+            disabled={!bwInput.trim()}
+            className="btn-primary px-5 disabled:opacity-50"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">Your plans</h2>
