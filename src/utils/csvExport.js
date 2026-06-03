@@ -40,6 +40,7 @@ function getSetRows(exercise) {
       weight: toNumber(set.weight),
       reps: toNumber(set.reps),
       rpe: set.rpe ?? '',
+      failed: !!set.failed,
     }))
   }
 
@@ -48,6 +49,7 @@ function getSetRows(exercise) {
     weight: toNumber(exercise?.weight),
     reps: toNumber(exercise?.reps),
     rpe: exercise?.rpe ?? '',
+    failed: false,
   }]
 }
 
@@ -108,6 +110,53 @@ export function buildWorkoutHistoryCSV(workoutLogs) {
             set.weight || '',
             set.reps || '',
             set.rpe || '',
+            volume || '',
+          ])
+        })
+      })
+    })
+
+  return rows.map((row) => row.map(escapeCsv).join(',')).join('\n')
+}
+
+// All logged sets for a single exercise (by name), newest-last, for spreadsheet analysis.
+export function buildExerciseHistoryCSV(exerciseName, workoutLogs) {
+  const target = String(exerciseName || '').trim().toLowerCase()
+  const rows = [[
+    'Date',
+    'Workout',
+    'Set',
+    'Weight (kg)',
+    'Reps',
+    'RPE',
+    'Failed',
+    'Est 1RM (kg)',
+    'Volume (kg)',
+  ]]
+
+  ;(workoutLogs || [])
+    .slice()
+    .filter((day) => !day?.deletedAt && !day?.deleted_at)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .forEach((day) => {
+      const date = normalizeDate(day.date)
+      const dateLabel = date ? date.toISOString().split('T')[0] : ''
+      const workoutName = day.label || day.workout_name || day.day_label || 'Workout'
+
+      ;(day.exercises || []).forEach((exercise) => {
+        if (String(exercise.name || '').trim().toLowerCase() !== target) return
+        getSetRows(exercise).forEach((set) => {
+          const volume = set.weight * set.reps
+          const est1RM = set.weight && set.reps ? Number((set.weight * (1 + set.reps / 30)).toFixed(1)) : ''
+          rows.push([
+            dateLabel,
+            workoutName,
+            set.setNumber,
+            set.weight || '',
+            set.reps || '',
+            set.rpe || '',
+            set.failed ? 'Y' : '',
+            est1RM,
             volume || '',
           ])
         })

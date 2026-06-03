@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Minus, Plus, Check, Trash2, Timer, X, ChevronLeft, ChevronRight, ChevronDown, Flag, StickyNote,
-  Lightbulb, Flame, Weight, AlertTriangle, TrendingDown, ArrowLeftRight,
+  Lightbulb, Flame, Weight, AlertTriangle, TrendingDown, ArrowLeftRight, Trophy,
 } from 'lucide-react'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import { useRestTimer, formatTime } from '../hooks/useRestTimer'
@@ -12,6 +12,7 @@ import { useWakeLock } from '../hooks/useWakeLock'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import ExercisePickerSheet from '../components/ExercisePickerSheet'
 import { SwapExerciseModal } from '../components/Workout/SwapExerciseModal'
+import { PRBadge } from '../components/PRBadge'
 import { parseRestSeconds } from '../utils/workoutHelpers'
 import { getProgressionSuggestion, detectPlateau } from '../utils/progressionSuggestion'
 import { generateWarmupSets, getWarmupReferenceWeight } from '../utils/warmupSets'
@@ -20,7 +21,41 @@ import { computePlatesPerSide, formatPlatesPerSide } from '../utils/plateMath'
 const AUTOSAVE_KEY = 'ppl_tracker_active_workout'
 const genExId = () => `added_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 
-const emptySet = () => ({ weight: '', reps: '', rpe: '' })
+const emptySet = () => ({ weight: '', reps: '', rpe: '', failed: false })
+
+// Quick-tap RPE values — most working sets land in this range.
+const RPE_CHIPS = ['7', '7.5', '8', '8.5', '9']
+
+// Group consecutive A1./A2./B1.… exercises (same leading letter) into supersets.
+// Pure/visual only — logging stays per-exercise.
+function groupExercises(exercises) {
+  const list = exercises || []
+  const labelOf = (ex) => {
+    const m = /^([A-Za-z])\d+\.\s/.exec(String(ex?.name || ''))
+    return m ? m[1].toUpperCase() : null
+  }
+  const groups = []
+  let i = 0
+  while (i < list.length) {
+    const letter = labelOf(list[i])
+    if (letter) {
+      const items = [list[i]]
+      let j = i + 1
+      while (j < list.length && labelOf(list[j]) === letter) {
+        items.push(list[j])
+        j++
+      }
+      if (items.length > 1) {
+        groups.push({ type: 'superset', letter, items })
+        i = j
+        continue
+      }
+    }
+    groups.push({ type: 'single', ex: list[i] })
+    i++
+  }
+  return groups
+}
 
 function buildLog(exercises) {
   const log = {}
@@ -106,11 +141,14 @@ export default function ActiveWorkoutPage() {
   const [showAddExercise, setShowAddExercise] = useState(false)
   const [showFinish, setShowFinish] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [prToast, setPrToast] = useState(null) // { name, weight }
+  const [prExerciseIds, setPrExerciseIds] = useState({}) // exId -> true (in-session PR badge)
   const startTimeRef = useRef(Date.now())
   const hydratedRef = useRef(false)
+  const celebratedRef = useRef({}) // exId -> true (already toasted this session)
 
   const { previousWeights } = usePrevWeight(exercises)
-  const { detectSessionPRs } = usePRDetection(completedDays)
+  const { detectSessionPRs, priorPRByName, priorPRById } = usePRDetection(completedDays)
   const { timeLeft, isRunning, startTimer, stopTimer, addTime } = useRestTimer({ enableVibration: restTimerVibration })
 
   // Keep the screen awake while logging.
@@ -133,6 +171,10 @@ export default function ActiveWorkoutPage() {
 
   // Hydrate from autosave (same plan+day) or initialize fresh when session changes.
   useEffect(() => {
+    // Reset in-session PR tracking when the day changes.
+    celebratedRef.current = {}
+    setPrExerciseIds({})
+    setPrToast(null)
     try {
       const raw = localStorage.getItem(AUTOSAVE_KEY)
       if (raw) {
@@ -172,6 +214,32 @@ export default function ActiveWorkoutPage() {
       }))
     } catch { /* ignore */ }
   }, [exercises, exerciseLog, sessionNotes, sessionKey, session.kind, session.planId, session.planDayId, session.label])
+
+  // Live PR detection: the moment a logged set beats the all-time best, celebrate.
+  useEffect(() => {
+    if (!hydratedRef.current) return
+    for (const ex of exercises) {
+      const sets = exerciseLog[ex.id]?.sets || []
+      let sessionMax = 0
+      for (const s of sets) {
+        const w = parseFloat(s.weight) || 0
+        if (w > sessionMax) sessionMax = w
+      }
+      const priorPR = Math.max(priorPRById[ex.id] || 0, priorPRByName[ex.name] || 0)
+      if (priorPR > 0 && sessionMax > priorPR && !celebratedRef.current[ex.id]) {
+        celebratedRef.current[ex.id] = true
+        setPrExerciseIds((prev) => ({ ...prev, [ex.id]: true }))
+        setPrToast({ name: ex.name, weight: sessionMax })
+      }
+    }
+  }, [exerciseLog, exercises, priorPRByName, priorPRById])
+
+  // Auto-dismiss the PR toast.
+  useEffect(() => {
+    if (!prToast) return undefined
+    const t = setTimeout(() => setPrToast(null), 2600)
+    return () => clearTimeout(t)
+  }, [prToast])
 
   // Editing a set does NOT start the timer (FitNotes-style). The rest timer
   // only runs when the user taps "Save exercise".
@@ -272,6 +340,7 @@ export default function ActiveWorkoutPage() {
           weight: parseFloat(s.weight) || 0,
           reps: parseInt(s.reps, 10) || 0,
           rpe: s.rpe === '' ? null : parseFloat(s.rpe),
+          failed: !!s.failed,
           timestamp: new Date().toISOString(),
         }))
       return {
@@ -317,6 +386,222 @@ export default function ActiveWorkoutPage() {
     navigate('/')
   }
 
+  // Renders one exercise card. Shared by single exercises and superset members.
+  const renderExerciseCard = (ex) => {
+    const log = exerciseLog[ex.id] || { sets: [emptySet()], notes: '' }
+    const prev = previousWeights[ex.id]
+    const exHistory = historyByName[ex.name] || []
+    const suggestion = getProgressionSuggestion(exHistory, ex.reps, ex.muscleGroup)
+    const plateau = detectPlateau(exHistory)
+    const firstWeight = log.sets?.[0]?.weight
+    const refWeight = getWarmupReferenceWeight(firstWeight, prev?.weight)
+    const warmups = generateWarmupSets(refWeight, weightUnit, { warmupSets: ex.warmupSets, workingReps: ex.reps })
+    const topEntered = (log.sets || []).reduce((m, s) => {
+      const w = parseFloat(s.weight)
+      return Number.isFinite(w) && w > m ? w : m
+    }, 0)
+    const plateWeight = topEntered || refWeight
+    const plates = plateWeight ? computePlatesPerSide(plateWeight, weightUnit) : null
+    const hasPlates = Boolean(plates?.perSide?.length)
+    const tool = expandedTool[ex.id] || null
+    const toggleTool = (name) => setExpandedTool((p) => ({ ...p, [ex.id]: p[ex.id] === name ? null : name }))
+    const exDone = (log.sets || []).some(isSetComplete)
+    const saved = Boolean(savedExercises[ex.id])
+    return (
+      <section key={ex.id} className="card p-4">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-bold text-zinc-900">{ex.name || 'Exercise'}</h2>
+              {prExerciseIds[ex.id] && <PRBadge />}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+              {ex.muscleGroup && <MuscleGroupBadge group={ex.muscleGroup} />}
+              {ex.reps && <span className="tnum">Target {ex.reps} reps</span>}
+              {ex.rpe && <span className="tnum">RPE {ex.rpe}</span>}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {prev && (
+              <button
+                onClick={() => applyLast(ex.id)}
+                className="rounded-lg bg-surface border border-surface-border px-2 py-1 text-right transition hover:border-accent active:scale-95"
+                aria-label={`Use last session: ${prev.weight} by ${prev.reps}`}
+                title="Tap to use last session's weight & reps"
+              >
+                <p className="text-[10px] uppercase tracking-wider text-zinc-500">Last · tap</p>
+                <p className="tnum text-sm font-semibold text-zinc-700">{prev.weight}×{prev.reps}</p>
+              </button>
+            )}
+            <button
+              onClick={() => setSwappingExId(ex.id)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:text-accent active:scale-95"
+              aria-label="Swap exercise"
+              title="Swap exercise"
+            >
+              <ArrowLeftRight size={15} />
+            </button>
+            <button
+              onClick={() => removeExercise(ex.id)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:text-danger active:scale-95"
+              aria-label="Remove exercise from this workout"
+              title="Remove from this workout"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* plateau warning (takes priority — flags a stall before the nudge) */}
+        {plateau.plateaued && (
+          <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warn" />
+            <span>{plateau.message}</span>
+          </div>
+        )}
+
+        {/* progression suggestion */}
+        {suggestion.suggest && suggestion.message && (
+          <div className="mb-3 flex items-start gap-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-accent-fg">
+            {suggestion.type === 'backoff'
+              ? <TrendingDown size={15} className="mt-0.5 shrink-0 text-accent" />
+              : <Lightbulb size={15} className="mt-0.5 shrink-0 text-accent" />}
+            <span>{suggestion.message}</span>
+          </div>
+        )}
+
+        {/* warm-up / plates tools */}
+        {(warmups.length > 0 || hasPlates) && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {warmups.length > 0 && (
+              <button
+                onClick={() => toggleTool('warmup')}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${tool === 'warmup' ? 'border-accent bg-accent-soft text-accent' : 'border-surface-border bg-surface text-zinc-600'}`}
+              >
+                <Flame size={13} /> Warm-up
+              </button>
+            )}
+            {hasPlates && (
+              <button
+                onClick={() => toggleTool('plates')}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${tool === 'plates' ? 'border-accent bg-accent-soft text-accent' : 'border-surface-border bg-surface text-zinc-600'}`}
+              >
+                <Weight size={13} /> Plates
+              </button>
+            )}
+          </div>
+        )}
+
+        {tool === 'warmup' && warmups.length > 0 && (
+          <div className="mb-3 space-y-1 rounded-xl border border-surface-border bg-surface p-3">
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Warm-up (not logged) · based on {Math.round(refWeight)}{weightUnit}</p>
+            {warmups.map((w) => (
+              <div key={w.id} className="flex items-center justify-between text-sm">
+                <span className="text-zinc-500">{w.label} · {w.percent}%</span>
+                <span className="tnum font-semibold text-zinc-800">{w.weight}{weightUnit} × {w.reps}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tool === 'plates' && hasPlates && (
+          <div className="mb-3 rounded-xl border border-surface-border bg-surface p-3 text-sm">
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+              Per side for {plateWeight}{weightUnit} (bar {plates.bar}{weightUnit})
+            </p>
+            <p className="tnum font-semibold text-zinc-800">{formatPlatesPerSide(plates)}</p>
+            {plates.remainder > 0 && (
+              <p className="mt-1 text-xs text-warn">+{plates.remainder}{weightUnit}/side not matchable with standard plates</p>
+            )}
+          </div>
+        )}
+
+        {/* set rows */}
+        <div className="space-y-2">
+          <div className="grid grid-cols-[20px_1fr_1fr_44px_28px] items-center gap-1.5 px-0.5 text-[10px] uppercase tracking-wider text-zinc-500">
+            <span>#</span>
+            <span className="text-center">Weight ({weightUnit})</span>
+            <span className="text-center">Reps</span>
+            <span className="text-center">RPE</span>
+            <span />
+          </div>
+          {log.sets.map((s, idx) => {
+            const done = isSetComplete(s)
+            const failed = !!s.failed
+            return (
+              <div key={idx} className="space-y-1">
+                <div
+                  className={`grid grid-cols-[20px_1fr_1fr_44px_28px] items-center gap-1.5 rounded-xl px-0.5 py-1 ${
+                    failed ? 'border border-red-200 bg-red-50'
+                    : done ? 'border border-surface-border bg-accent-soft'
+                    : ''
+                  }`}
+                >
+                  <span className={`tnum text-center text-sm font-bold ${failed ? 'text-danger' : done ? 'text-accent' : 'text-zinc-400'}`}>
+                    {failed ? <X size={15} className="mx-auto" /> : done ? <Check size={15} className="mx-auto" /> : idx + 1}
+                  </span>
+                  <Stepper value={s.weight} onChange={(v) => updateSet(ex.id, idx, 'weight', v)} step={2.5} decimal placeholder="0" />
+                  <Stepper value={s.reps} onChange={(v) => updateSet(ex.id, idx, 'reps', v)} step={1} placeholder="0" />
+                  <input
+                    inputMode="decimal"
+                    value={s.rpe}
+                    placeholder="–"
+                    aria-label={`RPE for set ${idx + 1}`}
+                    onChange={(e) => updateSet(ex.id, idx, 'rpe', e.target.value)}
+                    className="tnum h-11 w-full min-w-0 rounded-lg bg-surface border border-surface-border text-center text-sm text-zinc-800 placeholder-zinc-400 outline-none focus:ring-1 focus:ring-accent"
+                  />
+                  <button
+                    onClick={() => removeSet(ex.id, idx)}
+                    disabled={log.sets.length <= 1}
+                    className="flex h-8 w-7 items-center justify-center rounded-lg text-zinc-400 active:scale-95 disabled:opacity-30"
+                    aria-label="Remove set"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+
+                {/* quick RPE chips + failure flag */}
+                <div className="flex items-center gap-1 pl-[26px]">
+                  {RPE_CHIPS.map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => updateSet(ex.id, idx, 'rpe', String(s.rpe) === v ? '' : v)}
+                      className={`tnum rounded-md px-2 py-1 text-[11px] font-semibold transition ${String(s.rpe) === v ? 'bg-accent text-white' : 'bg-surface border border-surface-border text-zinc-600 hover:border-accent'}`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => updateSet(ex.id, idx, 'failed', !failed)}
+                    className={`ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${failed ? 'bg-danger text-white' : 'bg-surface border border-surface-border text-zinc-500 hover:border-danger'}`}
+                    aria-label={failed ? 'Unmark failed set' : 'Mark set as failed'}
+                  >
+                    <X size={12} /> Fail
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button onClick={() => addSet(ex.id)} className="btn-secondary text-sm">
+            <Plus size={16} /> Add set
+          </button>
+          <button
+            onClick={() => saveExercise(ex.id)}
+            disabled={!exDone}
+            className={saved
+              ? 'inline-flex items-center justify-center gap-2 rounded-xl border border-surface-border bg-accent-soft px-4 py-3 text-sm font-semibold text-accent disabled:opacity-50'
+              : 'btn-primary text-sm'}
+          >
+            <Check size={16} /> {saved ? 'Saved' : 'Save exercise'}
+          </button>
+        </div>
+      </section>
+    )
+  }
+
   if (session.isRest) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
@@ -342,6 +627,18 @@ export default function ActiveWorkoutPage() {
 
   return (
     <div className="pt-4">
+      {/* in-session PR toast */}
+      {prToast && (
+        <div
+          className="fixed left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-900 shadow-lg"
+          onClick={() => setPrToast(null)}
+          role="status"
+        >
+          <Trophy size={16} className="text-amber-500" />
+          New PR! {prToast.name} · {prToast.weight}{weightUnit}
+        </div>
+      )}
+
       {/* header */}
       <header className="mb-4 flex items-center gap-3">
         <button onClick={() => navigate('/')} className="btn-ghost p-2" aria-label="Back">
@@ -363,195 +660,25 @@ export default function ActiveWorkoutPage() {
         </span>
       </header>
 
-      {/* exercise cards */}
+      {/* exercise cards (supersets grouped) */}
       <div className="space-y-4">
-        {exercises.map((ex) => {
-          const log = exerciseLog[ex.id] || { sets: [emptySet()], notes: '' }
-          const prev = previousWeights[ex.id]
-          const exHistory = historyByName[ex.name] || []
-          const suggestion = getProgressionSuggestion(exHistory, ex.reps, ex.muscleGroup)
-          const plateau = detectPlateau(exHistory)
-          const firstWeight = log.sets?.[0]?.weight
-          const refWeight = getWarmupReferenceWeight(firstWeight, prev?.weight)
-          const warmups = generateWarmupSets(refWeight, weightUnit, { warmupSets: ex.warmupSets, workingReps: ex.reps })
-          const topEntered = (log.sets || []).reduce((m, s) => {
-            const w = parseFloat(s.weight)
-            return Number.isFinite(w) && w > m ? w : m
-          }, 0)
-          const plateWeight = topEntered || refWeight
-          const plates = plateWeight ? computePlatesPerSide(plateWeight, weightUnit) : null
-          const hasPlates = Boolean(plates?.perSide?.length)
-          const tool = expandedTool[ex.id] || null
-          const toggleTool = (name) => setExpandedTool((p) => ({ ...p, [ex.id]: p[ex.id] === name ? null : name }))
+        {groupExercises(exercises).map((group) => {
+          if (group.type === 'single') return renderExerciseCard(group.ex)
           return (
-            <section key={ex.id} className="card p-4">
-              <div className="mb-3 flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h2 className="font-bold text-zinc-900">{ex.name || 'Exercise'}</h2>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                    {ex.muscleGroup && <MuscleGroupBadge group={ex.muscleGroup} />}
-                    {ex.reps && <span className="tnum">Target {ex.reps} reps</span>}
-                    {ex.rpe && <span className="tnum">RPE {ex.rpe}</span>}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {prev && (
-                    <button
-                      onClick={() => applyLast(ex.id)}
-                      className="rounded-lg bg-surface border border-surface-border px-2 py-1 text-right transition hover:border-accent active:scale-95"
-                      aria-label={`Use last session: ${prev.weight} by ${prev.reps}`}
-                      title="Tap to use last session's weight & reps"
-                    >
-                      <p className="text-[10px] uppercase tracking-wider text-zinc-500">Last · tap</p>
-                      <p className="tnum text-sm font-semibold text-zinc-700">{prev.weight}×{prev.reps}</p>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setSwappingExId(ex.id)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:text-accent active:scale-95"
-                    aria-label="Swap exercise"
-                    title="Swap exercise"
-                  >
-                    <ArrowLeftRight size={15} />
-                  </button>
-                  <button
-                    onClick={() => removeExercise(ex.id)}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:text-danger active:scale-95"
-                    aria-label="Remove exercise from this workout"
-                    title="Remove from this workout"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
+            <div
+              key={`ss_${group.letter}_${group.items[0]?.id}`}
+              className="rounded-2xl border-2 border-accent/30 bg-accent-soft/50 p-1.5"
+            >
+              <div className="flex items-center gap-2 px-2 py-1.5">
+                <span className="rounded-md bg-accent px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                  Superset {group.letter}
+                </span>
+                <span className="text-xs text-zinc-500">Back-to-back · minimal rest</span>
               </div>
-
-              {/* plateau warning (takes priority — flags a stall before the nudge) */}
-              {plateau.plateaued && (
-                <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warn" />
-                  <span>{plateau.message}</span>
-                </div>
-              )}
-
-              {/* progression suggestion */}
-              {suggestion.suggest && suggestion.message && (
-                <div className="mb-3 flex items-start gap-2 rounded-xl bg-accent-soft px-3 py-2 text-xs text-accent-fg">
-                  {suggestion.type === 'backoff'
-                    ? <TrendingDown size={15} className="mt-0.5 shrink-0 text-accent" />
-                    : <Lightbulb size={15} className="mt-0.5 shrink-0 text-accent" />}
-                  <span>{suggestion.message}</span>
-                </div>
-              )}
-
-              {/* warm-up / plates tools */}
-              {(warmups.length > 0 || hasPlates) && (
-                <div className="mb-3 flex flex-wrap gap-2">
-                  {warmups.length > 0 && (
-                    <button
-                      onClick={() => toggleTool('warmup')}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${tool === 'warmup' ? 'border-accent bg-accent-soft text-accent' : 'border-surface-border bg-surface text-zinc-600'}`}
-                    >
-                      <Flame size={13} /> Warm-up
-                    </button>
-                  )}
-                  {hasPlates && (
-                    <button
-                      onClick={() => toggleTool('plates')}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${tool === 'plates' ? 'border-accent bg-accent-soft text-accent' : 'border-surface-border bg-surface text-zinc-600'}`}
-                    >
-                      <Weight size={13} /> Plates
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {tool === 'warmup' && warmups.length > 0 && (
-                <div className="mb-3 space-y-1 rounded-xl border border-surface-border bg-surface p-3">
-                  <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Warm-up (not logged) · based on {Math.round(refWeight)}{weightUnit}</p>
-                  {warmups.map((w) => (
-                    <div key={w.id} className="flex items-center justify-between text-sm">
-                      <span className="text-zinc-500">{w.label} · {w.percent}%</span>
-                      <span className="tnum font-semibold text-zinc-800">{w.weight}{weightUnit} × {w.reps}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {tool === 'plates' && hasPlates && (
-                <div className="mb-3 rounded-xl border border-surface-border bg-surface p-3 text-sm">
-                  <p className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
-                    Per side for {plateWeight}{weightUnit} (bar {plates.bar}{weightUnit})
-                  </p>
-                  <p className="tnum font-semibold text-zinc-800">{formatPlatesPerSide(plates)}</p>
-                  {plates.remainder > 0 && (
-                    <p className="mt-1 text-xs text-warn">+{plates.remainder}{weightUnit}/side not matchable with standard plates</p>
-                  )}
-                </div>
-              )}
-
-              {/* set rows */}
-              <div className="space-y-2">
-                <div className="grid grid-cols-[20px_1fr_1fr_44px_28px] items-center gap-1.5 px-0.5 text-[10px] uppercase tracking-wider text-zinc-500">
-                  <span>#</span>
-                  <span className="text-center">Weight ({weightUnit})</span>
-                  <span className="text-center">Reps</span>
-                  <span className="text-center">RPE</span>
-                  <span />
-                </div>
-                {log.sets.map((s, idx) => {
-                  const done = isSetComplete(s)
-                  return (
-                    <div
-                      key={idx}
-                      className={`grid grid-cols-[20px_1fr_1fr_44px_28px] items-center gap-1.5 rounded-xl px-0.5 py-1 ${done ? 'bg-accent-soft border border-surface-border' : ''}`}
-                    >
-                      <span className={`tnum text-center text-sm font-bold ${done ? 'text-accent' : 'text-zinc-400'}`}>
-                        {done ? <Check size={15} className="mx-auto" /> : idx + 1}
-                      </span>
-                      <Stepper value={s.weight} onChange={(v) => updateSet(ex.id, idx, 'weight', v)} step={2.5} decimal placeholder="0" />
-                      <Stepper value={s.reps} onChange={(v) => updateSet(ex.id, idx, 'reps', v)} step={1} placeholder="0" />
-                      <input
-                        inputMode="decimal"
-                        value={s.rpe}
-                        placeholder="–"
-                        aria-label={`RPE for set ${idx + 1}`}
-                        onChange={(e) => updateSet(ex.id, idx, 'rpe', e.target.value)}
-                        className="tnum h-11 w-full min-w-0 rounded-lg bg-surface border border-surface-border text-center text-sm text-zinc-800 placeholder-zinc-400 outline-none focus:ring-1 focus:ring-accent"
-                      />
-                      <button
-                        onClick={() => removeSet(ex.id, idx)}
-                        disabled={log.sets.length <= 1}
-                        className="flex h-8 w-7 items-center justify-center rounded-lg text-zinc-400 active:scale-95 disabled:opacity-30"
-                        aria-label="Remove set"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  )
-                })}
+              <div className="space-y-1.5">
+                {group.items.map((ex) => renderExerciseCard(ex))}
               </div>
-
-              {(() => {
-                const exDone = (log.sets || []).some(isSetComplete)
-                const saved = Boolean(savedExercises[ex.id])
-                return (
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button onClick={() => addSet(ex.id)} className="btn-secondary text-sm">
-                      <Plus size={16} /> Add set
-                    </button>
-                    <button
-                      onClick={() => saveExercise(ex.id)}
-                      disabled={!exDone}
-                      className={saved
-                        ? 'inline-flex items-center justify-center gap-2 rounded-xl border border-surface-border bg-accent-soft px-4 py-3 text-sm font-semibold text-accent disabled:opacity-50'
-                        : 'btn-primary text-sm'}
-                    >
-                      <Check size={16} /> {saved ? 'Saved' : 'Save exercise'}
-                    </button>
-                  </div>
-                )
-              })()}
-            </section>
+            </div>
           )
         })}
       </div>

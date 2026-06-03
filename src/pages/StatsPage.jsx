@@ -14,9 +14,11 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../components/AuthProvider'
 import MilestoneBadge from '../components/MilestoneBadge'
+import TrainingAlerts from '../components/TrainingAlerts'
 import { supabase } from '../lib/supabaseClient'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import { calculate1RM } from '../utils/oneRepMax'
+import { detectDeloadByMuscleGroup } from '../utils/rpeTrendAnalysis'
 
 const MUSCLE_GROUPS = [
   'Chest',
@@ -217,6 +219,8 @@ function StatsPage() {
   const [selectedExercise, setSelectedExercise] = useState('')
   const [bodyweightInput, setBodyweightInput] = useState('')
   const [earnedAchievementMap, setEarnedAchievementMap] = useState({})
+  const [volumeMuscle, setVolumeMuscle] = useState('All')
+  const [dismissedDeload, setDismissedDeload] = useState({})
 
   useEffect(() => {
     let active = true
@@ -311,6 +315,22 @@ function StatsPage() {
 
   const weeklyVolumeByMuscleData = useMemo(() => weeklyData.slice(-8), [weeklyData])
   const totalSetsPerWeekData = useMemo(() => weeklyData, [weeklyData])
+
+  // Volume-load trend (tonnage = weight × reps), all groups or one selected.
+  const volumeTrendData = useMemo(() => {
+    return weeklyData.map((week) => {
+      const tonnage = volumeMuscle === 'All'
+        ? MUSCLE_GROUPS.reduce((sum, group) => sum + (week[group] || 0), 0)
+        : (week[volumeMuscle] || 0)
+      return { weekShort: week.weekShort, tonnage: Math.round(tonnage) }
+    })
+  }, [weeklyData, volumeMuscle])
+
+  // Deload suggestions per muscle group (RPE ≥ 8.5 for the last 2 weeks).
+  const deloadAlerts = useMemo(
+    () => detectDeloadByMuscleGroup(completedDays).filter((a) => !dismissedDeload[a.id]),
+    [completedDays, dismissedDeload],
+  )
 
   const exerciseProgressSeries = useMemo(() => {
     const map = {}
@@ -420,6 +440,29 @@ function StatsPage() {
     ? Number((bodyweightSeries[bodyweightSeries.length - 1].weight - bodyweightSeries[0].weight).toFixed(1))
     : null
 
+  // Relative strength: best estimated 1RM per lift as a multiple of latest bodyweight.
+  const relativeStrength = useMemo(() => {
+    if (!latestBodyweight || latestBodyweight <= 0) return []
+    const bestE1RM = {}
+    completedDays.forEach((day) => {
+      ;(day.exercises || []).forEach((exercise) => {
+        if (!exercise?.name) return
+        const sets = Array.isArray(exercise.sets) ? exercise.sets : []
+        sets.forEach((set) => {
+          const weight = parseFloat(set.weight) || 0
+          const reps = parseInt(set.reps, 10) || 0
+          if (weight <= 0 || reps <= 0) return
+          const e1rm = calculate1RM(weight, reps)
+          if (e1rm > (bestE1RM[exercise.name] || 0)) bestE1RM[exercise.name] = e1rm
+        })
+      })
+    })
+    return Object.entries(bestE1RM)
+      .map(([name, e1rm]) => ({ name, e1rm, ratio: e1rm / latestBodyweight }))
+      .sort((a, b) => b.ratio - a.ratio)
+      .slice(0, 8)
+  }, [completedDays, latestBodyweight])
+
   const achievementProgress = useMemo(() => {
     const liftMaxes = getBestLiftMaxes(completedDays)
     const bestStreak = getBestStreak(completedDays)
@@ -490,6 +533,15 @@ function StatsPage() {
         </div>
       </div>
 
+      {deloadAlerts.length > 0 && (
+        <div className="mb-6">
+          <TrainingAlerts
+            alerts={deloadAlerts}
+            onDismiss={(id) => setDismissedDeload((prev) => ({ ...prev, [id]: true }))}
+          />
+        </div>
+      )}
+
       {showStatsEmpty ? (
         <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <h3 className="text-lg font-semibold text-zinc-900">Stats preview</h3>
@@ -529,6 +581,62 @@ function StatsPage() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          </section>
+
+          <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-zinc-800">Volume Load Trend (Last 12 Weeks)</h3>
+              <p className="text-xs text-zinc-500">Tonnage = weight × reps. Rising trend at flat output can signal overreaching.</p>
+            </div>
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {['All', ...MUSCLE_GROUPS].map((group) => (
+                <button
+                  key={group}
+                  type="button"
+                  onClick={() => setVolumeMuscle(group)}
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${volumeMuscle === group ? 'bg-zinc-900 text-white' : 'border border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100'}`}
+                >
+                  {group}
+                </button>
+              ))}
+            </div>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={volumeTrendData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e4e4e7" />
+                  <XAxis dataKey="weekShort" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={0} angle={-20} textAnchor="end" height={60} />
+                  <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #e4e4e7', fontSize: 12 }} formatter={(value) => [`${value} kg`, volumeMuscle === 'All' ? 'Total tonnage' : `${volumeMuscle} tonnage`]} />
+                  <Line type="monotone" dataKey="tonnage" stroke="#18181b" strokeWidth={2.5} dot={{ r: 3, fill: '#18181b' }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-zinc-800">Relative Strength</h3>
+              <p className="text-xs text-zinc-500">Best estimated 1RM as a multiple of bodyweight.</p>
+            </div>
+            {relativeStrength.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 py-3 text-sm text-zinc-500">
+                Log your bodyweight (below) to unlock relative-strength ratios.
+              </p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {relativeStrength.map((lift) => (
+                  <div key={lift.name} className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-zinc-900">{lift.name}</p>
+                      <p className="text-[11px] text-zinc-500">{lift.e1rm.toFixed(1)} kg e1RM</p>
+                    </div>
+                    <span className="tnum shrink-0 rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-bold text-white">
+                      {lift.ratio.toFixed(2)}× BW
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">

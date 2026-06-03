@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Download } from 'lucide-react'
 import MuscleGroupBadge from '../components/MuscleGroupBadge'
 import { useWorkoutStore } from '../store/useWorkoutStore'
+import { buildExerciseHistoryCSV, downloadCsvFile } from '../utils/csvExport'
 import {
   buildPersonalRecords,
   buildRecordsLookup,
@@ -473,6 +475,17 @@ function PersonalRecordsPage() {
                           </div>
                         </div>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={() => downloadCsvFile(
+                          buildExerciseHistoryCSV(record.exerciseName, completedDays),
+                          `${record.exerciseName.replace(/[^a-z0-9]+/gi, '_')}_history`,
+                        )}
+                        className="mt-3 inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-4 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-100"
+                      >
+                        <Download size={14} /> Export CSV
+                      </button>
                     </div>
                   )}
                 </article>

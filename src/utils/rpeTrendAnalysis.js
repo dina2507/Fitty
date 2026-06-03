@@ -44,6 +44,62 @@ function extractTopSet(entry) {
   return best
 }
 
+function weekStartKey(date) {
+  const d = new Date(date)
+  const day = d.getDay() || 7
+  d.setHours(0, 0, 0, 0)
+  d.setDate(d.getDate() - (day - 1))
+  return d.toISOString().split('T')[0]
+}
+
+// Deload detection per muscle group: if the average top-set RPE for a muscle
+// group is >= 8.5 across the 2 most recent weeks with data, suggest a deload.
+// Returns TrainingAlerts-shaped objects: { id, severity, message }.
+export function detectDeloadByMuscleGroup(completedDays) {
+  const days = Array.isArray(completedDays) ? completedDays : []
+  const groups = {} // group -> Map(weekKey -> { sum, count })
+
+  for (const day of days) {
+    if (day?.deletedAt || day?.deleted_at) continue
+    const when = new Date(day.date)
+    if (Number.isNaN(when.getTime())) continue
+    const weekKey = weekStartKey(when)
+
+    for (const exercise of day.exercises || []) {
+      const top = extractTopSet(exercise)
+      if (!top || !Number.isFinite(top.rpe)) continue
+      const group = exercise.muscleGroup || exercise.muscle_group
+      if (!group || group === 'Full Body') continue
+
+      if (!groups[group]) groups[group] = new Map()
+      const wk = groups[group]
+      const cur = wk.get(weekKey) || { sum: 0, count: 0 }
+      cur.sum += top.rpe
+      cur.count += 1
+      wk.set(weekKey, cur)
+    }
+  }
+
+  const alerts = []
+  for (const [group, wk] of Object.entries(groups)) {
+    const weeks = [...wk.entries()]
+      .map(([key, v]) => ({ key, avg: v.sum / v.count }))
+      .sort((a, b) => a.key.localeCompare(b.key))
+    if (weeks.length < 2) continue
+
+    const lastTwo = weeks.slice(-2)
+    if (lastTwo.every((w) => w.avg >= 8.5)) {
+      const peak = Math.max(...lastTwo.map((w) => w.avg))
+      alerts.push({
+        id: `deload_${group}`,
+        severity: peak >= 9 ? 'danger' : 'warning',
+        message: `${group}: top-set RPE has averaged ≥8.5 for 2 straight weeks (peak ${peak.toFixed(1)}). Consider scheduling a deload week for ${group}.`,
+      })
+    }
+  }
+  return alerts
+}
+
 export function analyzeRPETrend(exerciseHistory) {
   const history = Array.isArray(exerciseHistory) ? exerciseHistory : []
   if (history.length < 4) {
