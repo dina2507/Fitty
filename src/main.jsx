@@ -1,5 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { Capacitor } from '@capacitor/core'
 import App from './App.jsx'
 import './index.css'
 
@@ -51,7 +52,10 @@ if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.p
   });
 }
 
-if ('serviceWorker' in navigator) {
+// Register the service worker only for the web/PWA build. Inside the native
+// Capacitor shell the assets are bundled locally, so a SW would only risk
+// serving stale cached content.
+if ('serviceWorker' in navigator && !Capacitor.isNativePlatform()) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch((error) => {
       if (import.meta.env.DEV) {
