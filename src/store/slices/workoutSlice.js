@@ -364,6 +364,41 @@ export const createWorkoutSlice = (set, get) => ({
     }
   },
 
+  updateBodyweightLog: async (index, weight) => {
+    const { bodyweightLogs } = get()
+    const target = bodyweightLogs[index]
+    if (!target) return
+    const parsed = Number(weight)
+    if (!Number.isFinite(parsed) || parsed <= 0) return
+
+    const updated = bodyweightLogs.map((log, i) => (i === index ? { ...log, weight: parsed } : log))
+    updated.sort((a, b) => new Date(a.date) - new Date(b.date))
+    storage.saveBodyweightLogs(updated)
+    set({ bodyweightLogs: updated })
+
+    if (!CLOUD_SYNC_ENABLED) {
+      set({ syncStatus: 'saved' })
+      return
+    }
+
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user) {
+      const dateSimple = target.date.split('T')[0]
+      const payload = { user_id: session.user.id, date: dateSimple, weight: parsed }
+      if (!navigator.onLine) {
+        enqueueMutation('bodyweight_logs', 'delete', null, { user_id: session.user.id, date: dateSimple })
+        enqueueMutation('bodyweight_logs', 'insert', payload)
+      } else {
+        await supabase.from('bodyweight_logs').delete().match({ user_id: session.user.id, date: dateSimple })
+        const { error } = await supabase.from('bodyweight_logs').insert(payload)
+        if (error) {
+          enqueueMutation('bodyweight_logs', 'delete', null, { user_id: session.user.id, date: dateSimple })
+          enqueueMutation('bodyweight_logs', 'insert', payload)
+        }
+      }
+    }
+  },
+
   removeBodyweightLog: async (index) => {
     const { bodyweightLogs } = get()
     const target = bodyweightLogs[index]

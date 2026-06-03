@@ -40,6 +40,10 @@ export default function HomePage() {
   const [browse, setBrowse] = useState({ phaseIdx: 0, weekIdx: 0 })
   const [bwInput, setBwInput] = useState('')
   const [bwSaved, setBwSaved] = useState(false)
+  const [heatmapMonth, setHeatmapMonth] = useState(() => {
+    const d = new Date()
+    return new Date(d.getFullYear(), d.getMonth(), 1)
+  })
 
   const nextPeriodizedDay = getCurrentDay()
 
@@ -60,6 +64,57 @@ export default function HomePage() {
     }
     return map
   }, [completedDays])
+
+  // Workouts logged per local calendar day (key: YYYY-MM-DD).
+  const dailyWorkoutCounts = useMemo(() => {
+    const pad = (n) => String(n).padStart(2, '0')
+    const counts = {}
+    for (const day of completedDays || []) {
+      if (day?.deletedAt || day?.deleted_at) continue
+      const d = new Date(day.date)
+      if (Number.isNaN(d.getTime())) continue
+      const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      counts[key] = (counts[key] || 0) + 1
+    }
+    return counts
+  }, [completedDays])
+
+  // Calendar grid for the selected month (Monday-first), each cell a day with its count.
+  const monthGrid = useMemo(() => {
+    const pad = (n) => String(n).padStart(2, '0')
+    const year = heatmapMonth.getFullYear()
+    const month = heatmapMonth.getMonth()
+    const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7 // Mon=0
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const cells = []
+    for (let i = 0; i < firstWeekday; i++) cells.push(null)
+    for (let d = 1; d <= daysInMonth; d++) {
+      const key = `${year}-${pad(month + 1)}-${pad(d)}`
+      cells.push({ day: d, key, count: dailyWorkoutCounts[key] || 0 })
+    }
+    return cells
+  }, [heatmapMonth, dailyWorkoutCounts])
+
+  const monthActiveDays = useMemo(
+    () => monthGrid.filter((c) => c && c.count > 0).length,
+    [monthGrid],
+  )
+
+  const isCurrentMonth = (() => {
+    const now = new Date()
+    return now.getFullYear() === heatmapMonth.getFullYear() && now.getMonth() === heatmapMonth.getMonth()
+  })()
+
+  const shiftMonth = (delta) => {
+    setHeatmapMonth((m) => new Date(m.getFullYear(), m.getMonth() + delta, 1))
+  }
+
+  const heatColor = (count) => {
+    if (count <= 0) return 'bg-zinc-100 text-zinc-400'
+    if (count === 1) return 'bg-emerald-200 text-emerald-900'
+    if (count === 2) return 'bg-emerald-400 text-white'
+    return 'bg-emerald-600 text-white'
+  }
 
   const resume = useMemo(() => {
     try {
@@ -396,6 +451,57 @@ export default function HomePage() {
           <Plus size={18} /> Create your own plan
         </button>
       </section>
+
+      {/* monthly consistency heatmap */}
+      <div className="card px-4 py-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">Consistency</h2>
+            <p className="text-xs text-zinc-500">
+              <span className="tnum font-semibold text-zinc-700">{monthActiveDays}</span> active day{monthActiveDays === 1 ? '' : 's'} this month
+            </p>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => shiftMonth(-1)}
+              className="btn-ghost p-2"
+              aria-label="Previous month"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <span className="min-w-[7.5rem] text-center text-sm font-semibold text-zinc-800">
+              {heatmapMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+            </span>
+            <button
+              onClick={() => shiftMonth(1)}
+              disabled={isCurrentMonth}
+              className="btn-ghost p-2 disabled:opacity-30"
+              aria-label="Next month"
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1.5 text-center">
+          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+            <span key={i} className="text-[10px] font-semibold uppercase text-zinc-400">{d}</span>
+          ))}
+          {monthGrid.map((cell, i) => (
+            cell === null ? (
+              <span key={`blank_${i}`} />
+            ) : (
+              <div
+                key={cell.key}
+                title={`${cell.key} · ${cell.count} workout${cell.count === 1 ? '' : 's'}`}
+                className={`flex aspect-square items-center justify-center rounded-md text-[11px] font-semibold tnum ${heatColor(cell.count)}`}
+              >
+                {cell.day}
+              </div>
+            )
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

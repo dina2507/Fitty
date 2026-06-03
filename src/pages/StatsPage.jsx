@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { Pencil, Trash2, Check, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../components/AuthProvider'
 import MilestoneBadge from '../components/MilestoneBadge'
@@ -213,6 +214,8 @@ function StatsPage() {
   const completedDays = useWorkoutStore((state) => state.completedDays)
   const bodyweightLogs = useWorkoutStore((state) => state.bodyweightLogs)
   const logBodyweight = useWorkoutStore((state) => state.logBodyweight)
+  const updateBodyweightLog = useWorkoutStore((state) => state.updateBodyweightLog)
+  const removeBodyweightLog = useWorkoutStore((state) => state.removeBodyweightLog)
   const currentPhaseId = useWorkoutStore((state) => state.currentPhaseId)
   const currentWeek = useWorkoutStore((state) => state.currentWeek)
 
@@ -221,6 +224,8 @@ function StatsPage() {
   const [earnedAchievementMap, setEarnedAchievementMap] = useState({})
   const [volumeMuscle, setVolumeMuscle] = useState('All')
   const [dismissedDeload, setDismissedDeload] = useState({})
+  const [bwEditIndex, setBwEditIndex] = useState(null)
+  const [bwEditValue, setBwEditValue] = useState('')
 
   useEffect(() => {
     let active = true
@@ -498,6 +503,33 @@ function StatsPage() {
     if (!Number.isFinite(parsed) || parsed <= 0) return
     logBodyweight(parsed)
     setBodyweightInput('')
+  }
+
+  // Entries with their real store-array index, newest first, for edit/delete.
+  const bodyweightEntries = useMemo(
+    () => (bodyweightLogs || [])
+      .map((log, index) => ({ ...log, index }))
+      .sort((a, b) => new Date(b.date) - new Date(a.date)),
+    [bodyweightLogs],
+  )
+
+  const startBwEdit = (entry) => {
+    setBwEditIndex(entry.index)
+    setBwEditValue(String(entry.weight))
+  }
+  const cancelBwEdit = () => {
+    setBwEditIndex(null)
+    setBwEditValue('')
+  }
+  const saveBwEdit = (index) => {
+    const parsed = parseFloat(bwEditValue)
+    if (!Number.isFinite(parsed) || parsed <= 0) return
+    updateBodyweightLog(index, parsed)
+    cancelBwEdit()
+  }
+  const deleteBwEntry = (index) => {
+    removeBodyweightLog(index)
+    if (bwEditIndex === index) cancelBwEdit()
   }
 
   const showStatsEmpty = workoutCount < 2
@@ -792,6 +824,77 @@ function StatsPage() {
             </div>
           )}
         </div>
+
+        {bodyweightEntries.length > 0 && (
+          <div className="mt-4">
+            <p className="mb-2 text-[10px] uppercase tracking-wider text-zinc-500">Entries ({bodyweightEntries.length})</p>
+            <div className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
+              {bodyweightEntries.map((entry) => (
+                <div
+                  key={entry.date}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
+                >
+                  {bwEditIndex === entry.index ? (
+                    <>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        autoFocus
+                        value={bwEditValue}
+                        onChange={(e) => setBwEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveBwEdit(entry.index)
+                          if (e.key === 'Escape') cancelBwEdit()
+                        }}
+                        className="w-24 rounded-lg border border-zinc-300 px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500"
+                      />
+                      <div className="flex items-center gap-1">
+                        <span className="mr-1 text-[11px] text-zinc-500">{new Date(entry.date).toLocaleDateString()}</span>
+                        <button
+                          onClick={() => saveBwEdit(entry.index)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-900 text-white hover:bg-zinc-800"
+                          aria-label="Save"
+                        >
+                          <Check size={14} />
+                        </button>
+                        <button
+                          onClick={cancelBwEdit}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-300 text-zinc-500 hover:bg-zinc-100"
+                          aria-label="Cancel"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="min-w-0">
+                        <p className="tnum text-sm font-semibold text-zinc-900">{Number(entry.weight).toFixed(1)} kg</p>
+                        <p className="text-[11px] text-zinc-500">{new Date(entry.date).toLocaleDateString()}</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => startBwEdit(entry)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+                          aria-label="Edit entry"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => deleteBwEntry(entry.index)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:bg-red-50 hover:text-danger"
+                          aria-label="Delete entry"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
