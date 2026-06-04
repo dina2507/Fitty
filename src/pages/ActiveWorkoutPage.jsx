@@ -17,6 +17,8 @@ import { parseRestSeconds } from '../utils/workoutHelpers'
 import { getProgressionSuggestion, detectPlateau } from '../utils/progressionSuggestion'
 import { generateWarmupSets, getWarmupReferenceWeight } from '../utils/warmupSets'
 import { computePlatesPerSide, formatPlatesPerSide } from '../utils/plateMath'
+import { hapticImpact, hapticSuccess } from '../utils/haptics'
+import { playClick, playPR, playFinish, primeSfx } from '../utils/sfx'
 
 const AUTOSAVE_KEY = 'ppl_tracker_active_workout'
 const genExId = () => `added_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
@@ -235,6 +237,8 @@ export default function ActiveWorkoutPage() {
         celebratedRef.current[ex.id] = true
         setPrExerciseIds((prev) => ({ ...prev, [ex.id]: true }))
         setPrToast({ name: ex.name, weight: sessionMax })
+        hapticSuccess()
+        playPR()
       }
     }
   }, [exerciseLog, exercises, priorPRByName, priorPRById])
@@ -268,6 +272,9 @@ export default function ActiveWorkoutPage() {
     const target = exercises.find((e) => e.id === exId)
     startTimer(parseRestSeconds(target?.rest, restTimerDefault))
     setSavedExercises((prev) => ({ ...prev, [exId]: true }))
+    primeSfx()
+    hapticImpact('medium')
+    playClick()
   }, [exercises, restTimerDefault, startTimer])
 
   const addSet = useCallback((exId) => {
@@ -379,6 +386,8 @@ export default function ActiveWorkoutPage() {
       }
       localStorage.removeItem(AUTOSAVE_KEY)
       stopTimer()
+      hapticSuccess()
+      playFinish()
       navigate('/history')
     } finally {
       setSaving(false)

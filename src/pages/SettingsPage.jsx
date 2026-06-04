@@ -10,6 +10,8 @@ import {
   downloadAsZip,
 } from '../utils/csvExport'
 import { generateMonthlyPDF } from '../utils/pdfExport'
+import { hapticsEnabled, setHapticsEnabled, hapticImpact } from '../utils/haptics'
+import { sfxEnabled, setSfxEnabled, playClick } from '../utils/sfx'
 
 function SettingsPage() {
   const exportData = useWorkoutStore((state) => state.exportData)
@@ -34,6 +36,8 @@ function SettingsPage() {
 
   const [backupText, setBackupText] = useState('')
   const [status, setStatus] = useState('')
+  const [soundOn, setSoundOn] = useState(() => sfxEnabled())
+  const [hapticsOn, setHapticsOn] = useState(() => hapticsEnabled())
   const [recovery, setRecovery] = useState(() => storage.getRecoverySnapshot())
   const [restDefaultInput, setRestDefaultInput] = useState(String(restTimerDefault))
   const [isSavingPrefs, setIsSavingPrefs] = useState(false)
@@ -378,6 +382,52 @@ function SettingsPage() {
             }`}
           >
             {restTimerVibration ? 'On' : 'Off'}
+          </button>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800/50">
+          <div>
+            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Sound effects</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">Play a cue when you save a set, hit a PR, or finish.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !soundOn
+              setSfxEnabled(next)
+              setSoundOn(next)
+              if (next) playClick()
+            }}
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+              soundOn
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : 'border border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800'
+            }`}
+          >
+            {soundOn ? 'On' : 'Off'}
+          </button>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-800/50">
+          <div>
+            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Haptic feedback</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">Vibrate when you save a set, hit a PR, or finish.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !hapticsOn
+              setHapticsEnabled(next)
+              setHapticsOn(next)
+              if (next) hapticImpact('medium')
+            }}
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+              hapticsOn
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : 'border border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800'
+            }`}
+          >
+            {hapticsOn ? 'On' : 'Off'}
           </button>
         </div>
       </section>

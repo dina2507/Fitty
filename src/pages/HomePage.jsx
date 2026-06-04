@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Dumbbell, Plus, ChevronRight, ChevronLeft, Calendar, Layers, Play, CheckCircle2, Scale } from 'lucide-react'
 import { useWorkoutStore } from '../store/useWorkoutStore'
 import SyncIndicator from '../components/SyncIndicator'
+import Onboarding from '../components/Onboarding'
 import { getTodayDateString } from '../utils/dateUtils'
 
 const AUTOSAVE_KEY = 'ppl_tracker_active_workout'
@@ -40,6 +41,7 @@ export default function HomePage() {
   const [browse, setBrowse] = useState({ phaseIdx: 0, weekIdx: 0 })
   const [bwInput, setBwInput] = useState('')
   const [bwSaved, setBwSaved] = useState(false)
+  const [showOnboarding, setShowOnboarding] = useState(() => localStorage.getItem('fitty_onboarded') !== 'true')
   const [heatmapMonth, setHeatmapMonth] = useState(() => {
     const d = new Date()
     return new Date(d.getFullYear(), d.getMonth(), 1)
@@ -183,6 +185,15 @@ export default function HomePage() {
 
   return (
     <div className="space-y-5 pt-4">
+      {showOnboarding && (
+        <Onboarding
+          onDone={() => {
+            localStorage.setItem('fitty_onboarded', 'true')
+            setShowOnboarding(false)
+          }}
+        />
+      )}
+
       <header className="flex items-start justify-between">
         <div>
           <p className="text-sm text-zinc-500">{greeting()}</p>
